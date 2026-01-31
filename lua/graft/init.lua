@@ -1,3 +1,11 @@
+--- @module 'graft'
+--- @description Main entry point for the Graft plugin.
+--- This module is responsible for initializing the plugin, setting up user commands,
+--- configuring default keymaps, and exposing the public API.
+---
+--- It coordinates between the configuration, actions, and API client modules to
+--- provide the core functionality of the plugin.
+
 local M = {}
 local config = require("graft.config")
 local actions = require("graft.actions")
@@ -5,10 +13,16 @@ local utils = require("graft.utils")
 local client = require("graft.api.client")
 local state = require("graft.core.state")
 
+--- Setup the Graft plugin with user options.
+--- This function initializes the configuration, creates user commands,
+--- and sets up default keymaps if enabled.
+---
+--- @param user_opts table|nil Configuration options provided by the user.
+---   - use_default_keymaps (boolean): Whether to set up default keybindings (default: true).
+---   - [other options]: See graft.config for full list of options.
 function M.setup(user_opts)
 	config.setup(user_opts)
 
-	-- Commands (Must start with Uppercase)
 	vim.api.nvim_create_user_command("GraftStop", function()
 		if client and client.stop_job then
 			client.stop_job()
@@ -38,7 +52,6 @@ function M.setup(user_opts)
 		utils.notify("Chat history cleared.")
 	end, {})
 
-	-- Keymaps
 	if user_opts and user_opts.use_default_keymaps ~= false then
 		vim.keymap.set({ "n", "v" }, "<leader>aa", actions.start, { desc = "Graft: Menu" })
 		vim.keymap.set({ "n", "v" }, "<leader>ar", actions.refactor, { desc = "Graft: Refactor" })
@@ -56,11 +69,22 @@ function M.setup(user_opts)
 	end
 end
 
--- Expose Public API
+--- Public API exports
+--- These functions are exposed for programmatic use or mapping.
+
+--- Start the Graft main menu or action selection.
 M.start = actions.start
+
+--- Trigger a refactor action on the selected code or current buffer.
 M.refactor = actions.refactor
+
+--- Open the planning/chat interface.
 M.plan = actions.plan
+
+--- Open the model selection menu.
 M.select_model = actions.select_model
+
+--- Stop any currently running API job.
 M.stop_job = client.stop_job
 
 return M

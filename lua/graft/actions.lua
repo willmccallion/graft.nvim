@@ -1,4 +1,15 @@
+--- @module actions.lua
+--- @brief Main UI controller for the Graft plugin.
+---
+--- This module provides the primary entry points for user interaction with Graft.
+--- It handles:
+--- - Context management (adding files/directories to AI context).
+--- - Refactor workflow (generating smart patches for code modification).
+--- - Plan workflow (interactive chat for architectural planning).
+--- - Model and provider selection.
+--- - Transaction management (accepting/rejecting AI-generated changes).
 local M = {}
+
 local components = require("graft.ui.components")
 local indicators = require("graft.ui.indicators")
 local preview = require("graft.ui.preview")
@@ -9,40 +20,39 @@ local state = require("graft.core.state")
 local context_manager = require("graft.context")
 local client = require("graft.api.client")
 
--- IMPROVED PROMPT: Forces "Whole Function Replacement" for stability
-local PROMPT_REFACTOR = [[You are an expert coding agent specializing in Unified Diff generation.
-Your task is to modify the provided code based on the user's instruction.
+--- System prompt for the Refactor (Smart Patch) workflow.
+--- Instructs the AI to generate Search/Replace blocks instead of Diffs.
+--- This matches the parser logic in client.lua and patcher.lua.
+local PROMPT_REFACTOR = [[You are an expert coding agent.
+Your task is to modify the provided code based on the user's instruction using Search and Replace blocks.
 
-STRICT GENERATION STRATEGY:
-1. **WHOLE FUNCTION REPLACEMENT**: If you need to modify code inside a function, you MUST delete (-) the ENTIRE original function and add (+) the ENTIRE new function.
-   - Do NOT try to patch individual lines inside a function. It causes syntax errors.
-   - Replace the whole block.
+STRICT OUTPUT FORMAT:
+For every modification, output a block in this exact format:
 
-2. **SCAN FOR DEPENDENCIES**:
-   - If you change a function signature (e.g., add_task), you MUST scan the entire file for calls to that function (especially in `main`) and update them too.
-   - If you add a new function, ensure it is placed correctly (e.g., before main).
+<<<< SEARCH
+[Exact lines from the original file to be replaced]
+==== REPLACE
+[The new code to insert]
+>>>> END
 
-3. **OUTPUT FORMAT**:
-   - Start immediately with `--- a/filename`.
-   - Use standard Unified Diff format.
-   - No Markdown.
-
-Example of Whole Function Replacement:
-@@ ... @@
--void func(int a) {
--    printf("Old: %d", a);
--}
-+void func(int a, int b) {
-+    printf("New: %d %d", a, b);
-+}
+RULES:
+1. **Context**: Include enough lines in the SEARCH block to uniquely locate the code.
+2. **Accuracy**: The SEARCH block must match the original file content exactly (including whitespace).
+3. **Completeness**: If replacing a function, include the whole function signature in the SEARCH block.
+4. **No Diffs**: Do NOT use Unified Diff format (no +++ or ---).
+5. **No Markdown**: Output the blocks directly without markdown code fences.
 ]]
 
+--- Prompt plan for the Senior Technical Lead persona.
+--- Defines formatting rules and communication style.
 local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - Use Markdown formatting.
 - Be concise but thorough.
 - When suggesting code, use proper syntax highlighting.]]
 
--- RECURSIVE DIRECTORY ADDER
+--- Recursively adds files from a directory to the context.
+--- Skips .git and node_modules directories to avoid cluttering the context.
+--- @param dir_path string: The path to the directory to add.
 local function add_directory_recursive(dir_path)
 	local abs_dir = vim.fn.fnamemodify(dir_path, ":p")
 	if vim.fn.isdirectory(abs_dir) == 0 then
@@ -50,7 +60,6 @@ local function add_directory_recursive(dir_path)
 		return
 	end
 
-	-- Find all files, skip .git, node_modules, etc.
 	local files = vim.fn.glob(abs_dir .. "**/*", true, true)
 	local added = 0
 	for _, file in ipairs(files) do
@@ -63,7 +72,9 @@ local function add_directory_recursive(dir_path)
 	utils.notify("Added " .. added .. " files from " .. dir_path)
 end
 
--- NEW: Telescope Directory Picker
+--- Opens a Telescope picker to select a directory for context.
+--- Falls back to manual input if Telescope is not installed.
+--- @param callback function: The function to call with the selected directory path.
 local function select_dir_telescope(callback)
 	local has_tel, _ = pcall(require, "telescope")
 	if not has_tel then
@@ -97,6 +108,9 @@ local function select_dir_telescope(callback)
 		:find()
 end
 
+--- Opens the Context Manager menu.
+--- Allows the user to add files (supports multi-select via Telescope), add directories,
+--- clear the current context, or return to the main menu.
 function M.manage_context()
 	local ctx_label = "Context Manager (" .. #state.context_files .. " files)"
 	local options = {
@@ -161,6 +175,9 @@ function M.manage_context()
 	end)
 end
 
+--- Starts the main Graft interface.
+--- Displays the main menu with options for Refactor, Plan, Context Manager, and Model Selection.
+--- This is the primary entry point for the plugin's UI.
 function M.start()
 	local prov = providers.get_current()
 	local model_display = prov.model_id or prov.name
@@ -186,6 +203,9 @@ function M.start()
 	end)
 end
 
+--- Initiates the Refactor (Smart Patch) workflow.
+--- Verifies the provider, captures the current context, prompts the user for instructions,
+--- and streams the AI response to the buffer as a patch.
 function M.refactor()
 	local prov = providers.get_current()
 	local ok, err = prov:verify()
@@ -202,7 +222,6 @@ function M.refactor()
 		local extra_context = context_manager.get_external_context()
 		local target_buf = vim.api.nvim_get_current_buf()
 
-		-- Explicitly label sections for the LLM
 		local full_prompt = string.format(
 			"%s\n\n=== TARGET FILE CONTENT ===\n%s\n\n=== INSTRUCTION ===\n%s",
 			extra_context,
@@ -220,6 +239,9 @@ function M.refactor()
 	end)
 end
 
+--- Initiates the Plan (Chat Mode) workflow.
+--- Opens a dedicated chat buffer and streams the conversation with the AI model.
+--- Handles chat history and context resolution for the first message.
 function M.plan()
 	local prov = providers.get_current()
 	local ok, err = prov:verify()
@@ -231,7 +253,6 @@ function M.plan()
 	components.open_chat(function(user_input, chat_buf)
 		local line_count = vim.api.nvim_buf_line_count(chat_buf)
 
-		-- FIX: Split input into lines to prevent "item contains newlines" error
 		local input_lines = vim.split(user_input, "\n")
 		local lines_to_add = { "", "## User" }
 		vim.list_extend(lines_to_add, input_lines)
@@ -255,6 +276,8 @@ function M.plan()
 	end)
 end
 
+--- Opens a menu to select the AI provider and model.
+--- Supports switching between configured providers (e.g., OpenAI, Anthropic) and selecting specific Ollama models.
 function M.select_model()
 	local items = {}
 	for key, val in pairs(providers.list) do
@@ -281,6 +304,8 @@ function M.select_model()
 	end)
 end
 
+--- Accepts the pending changes in the current transaction.
+--- Clears indicators, closes the preview window, and resets the internal state.
 function M.accept_changes()
 	if not state.transaction.bufnr then
 		return
@@ -291,6 +316,8 @@ function M.accept_changes()
 	utils.notify("Changes Accepted.")
 end
 
+--- Rejects the pending changes in the current transaction.
+--- Reverts the buffer to its original state, clears indicators, closes the preview window, and resets the internal state.
 function M.reject_changes()
 	if not state.transaction.bufnr or not state.transaction.original_lines then
 		return

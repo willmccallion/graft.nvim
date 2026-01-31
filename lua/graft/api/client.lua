@@ -24,36 +24,33 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 	parsers.reset()
 
-	if is_patch and config.options.show_preview then
+	-- DEBUG OVERRIDE: Always show preview if Debug Mode is ON
+	local show_preview = config.options.show_preview or config.options.debug
+
+	if is_patch and show_preview then
 		local buf, _ = preview.ensure_preview_window()
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "--- graft START [" .. model_name .. "] ---", "" })
 	end
 
 	local output_buf = target_buf
 	local current_line_idx = is_chat and vim.api.nvim_buf_line_count(target_buf) or 0
-	local patch_state = "IDLE"
-	local hunk_ops = {}
+
+	-- Search/Replace State Machine
+	local sr_mode = "IDLE" -- IDLE, SEARCH, REPLACE
+	local search_buffer = {}
+	local replace_buffer = {}
 	local buffer_text = ""
 	local patches_applied = 0
 
-	-- Token tracking (Initialize with 0s)
+	-- Token tracking
 	local usage_stats = { input = 0, output = 0, total = 0 }
-
-	local function flush_hunk()
-		if #hunk_ops > 0 then
-			if patcher.apply_patch_block(target_buf, hunk_ops) then
-				patches_applied = patches_applied + 1
-			end
-			hunk_ops = {}
-		end
-	end
 
 	local function process_line(line)
 		line = line:gsub("\r", "")
+
 		if is_chat then
 			vim.api.nvim_buf_set_lines(output_buf, current_line_idx, current_line_idx, false, { line })
 			current_line_idx = current_line_idx + 1
-			-- Auto-scroll
 			local win_ids = vim.fn.win_findbuf(output_buf)
 			for _, win_id in ipairs(win_ids) do
 				vim.api.nvim_win_call(win_id, function()
@@ -61,31 +58,35 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				end)
 			end
 		elseif is_patch then
-			if line:match("^%s*```") then
-				return
+			-- LOGGING: If in debug mode or preview is on, log everything
+			if show_preview then
+				preview.log(line)
 			end
-			if line:match("^@@ %-") then
-				flush_hunk()
-				patch_state = "IN_HUNK"
+
+			-- 1. Detect Block Markers
+			if line:match("^<<<< SEARCH") then
+				sr_mode = "SEARCH"
+				search_buffer = {}
 				return
-			end
-			if patch_state == "IN_HUNK" then
-				local first_char = line:sub(1, 1)
-				local content = line:sub(2)
-				if first_char == " " then
-					table.insert(hunk_ops, { op = "ctx", text = content })
-				elseif first_char == "-" then
-					table.insert(hunk_ops, { op = "del", text = content })
-				elseif first_char == "+" then
-					table.insert(hunk_ops, { op = "add", text = content })
-				else
-					if line == "" then
-						table.insert(hunk_ops, { op = "ctx", text = "" })
-					else
-						flush_hunk()
-						patch_state = "IDLE"
+			elseif line:match("^==== REPLACE") then
+				sr_mode = "REPLACE"
+				replace_buffer = {}
+				return
+			elseif line:match("^>>>> END") then
+				if sr_mode == "REPLACE" then
+					if patcher.apply_search_replace(target_buf, search_buffer, replace_buffer) then
+						patches_applied = patches_applied + 1
 					end
 				end
+				sr_mode = "IDLE"
+				return
+			end
+
+			-- 2. Collect Lines
+			if sr_mode == "SEARCH" then
+				table.insert(search_buffer, line)
+			elseif sr_mode == "REPLACE" then
+				table.insert(replace_buffer, line)
 			end
 		end
 	end
@@ -123,22 +124,16 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				return
 			end
 
-			-- Updated to accept metadata
 			local content, metadata = provider.parse_chunk(data)
-
 			if metadata then
 				usage_stats = metadata
 			end
-
 			if not content or content == "" then
 				return
 			end
 
 			full_response = full_response .. content
 			vim.schedule(function()
-				if is_patch then
-					preview.log(content)
-				end
 				buffer_text = buffer_text .. content
 				if buffer_text:find("\n") then
 					local lines = vim.split(buffer_text, "\n")
@@ -154,7 +149,7 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				if buffer_text ~= "" then
 					process_line(buffer_text)
 				end
-				flush_hunk()
+
 				state.is_streaming = false
 				indicators.stop_spinner(target_buf)
 
@@ -162,13 +157,10 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 					table.insert(state.chat_history, { role = "assistant", content = full_response })
 				end
 
-				-- Construct status message with tokens (Defensive checks)
 				local token_msg = ""
 				local t_in = usage_stats.input or 0
 				local t_out = usage_stats.output or 0
-				local t_total = usage_stats.total or (t_in + t_out)
-
-				if t_total > 0 then
+				if (t_in + t_out) > 0 then
 					token_msg = string.format(" [In:%d Out:%d]", t_in, t_out)
 				end
 
@@ -176,15 +168,16 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 					if patches_applied > 0 then
 						utils.notify("Refactor Complete. Applied " .. patches_applied .. " changes." .. token_msg)
 						preview.close()
-					elseif full_response:match("@@") then
-						if patches_applied == 0 then
-							utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
-						end
+					elseif full_response:match("<<<< SEARCH") then
+						utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
 					else
-						utils.notify("Refactor Failed: Invalid Diff format." .. token_msg, vim.log.levels.WARN)
+						-- Now that we log everything, this error is more helpful
+						utils.notify(
+							"Refactor Failed: No SEARCH/REPLACE blocks found. Check Preview." .. token_msg,
+							vim.log.levels.WARN
+						)
 					end
 				else
-					-- Chat completion notification
 					utils.notify("Done." .. token_msg)
 				end
 			end)
