@@ -30,6 +30,7 @@ local function add_directory_recursive(dir_path)
 		return
 	end
 
+	-- Find all files, skip .git, node_modules, etc.
 	local files = vim.fn.glob(abs_dir .. "**/*", true, true)
 	local added = 0
 	for _, file in ipairs(files) do
@@ -39,14 +40,48 @@ local function add_directory_recursive(dir_path)
 			end
 		end
 	end
-	utils.notify("Added " .. added .. " files from directory.")
+	utils.notify("Added " .. added .. " files from " .. dir_path)
+end
+
+-- NEW: Telescope Directory Picker
+local function select_dir_telescope(callback)
+	local has_tel, _ = pcall(require, "telescope")
+	if not has_tel then
+		utils.notify("Telescope not found. Falling back to manual input.", vim.log.levels.WARN)
+		components.ask("Directory Path", callback)
+		return
+	end
+
+	local pickers = require("telescope.pickers")
+	local finders = require("telescope.finders")
+	local conf = require("telescope.config").values
+	local actions_tel = require("telescope.actions")
+	local action_state = require("telescope.actions.state")
+
+	pickers
+		.new({}, {
+			prompt_title = "Select Directory for Context",
+			finder = finders.new_oneshot_job({ "find", ".", "-type", "d", "-not", "-path", "*/.*" }, {}),
+			sorter = conf.generic_sorter({}),
+			attach_mappings = function(prompt_bufnr, _)
+				actions_tel.select_default:replace(function()
+					local selection = action_state.get_selected_entry()
+					actions_tel.close(prompt_bufnr)
+					if selection then
+						callback(selection[1])
+					end
+				end)
+				return true
+			end,
+		})
+		:find()
 end
 
 function M.manage_context()
 	local ctx_label = "Context Manager (" .. #state.context_files .. " files)"
 	local options = {
 		components.Menu.item("Add File(s) (Multi-select)"),
-		components.Menu.item("Add Directory (Recursive)"),
+		components.Menu.item("Add Directory (Telescope)"),
 		components.Menu.item("Clear All Context"),
 		components.Menu.item("Back"),
 	}
@@ -90,11 +125,11 @@ function M.manage_context()
 				end)
 			end
 		elseif item.text:match("Add Directory") then
-			components.ask("Directory Path (e.g. lua/graft)", function(dir)
+			select_dir_telescope(function(dir)
 				if dir and dir ~= "" then
 					add_directory_recursive(dir)
 				end
-				M.manage_context()
+				vim.schedule(M.manage_context)
 			end)
 		elseif item.text:match("Clear All") then
 			state.context_files = {}
@@ -106,6 +141,7 @@ function M.manage_context()
 	end)
 end
 
+-- (Keep the rest of your actions.lua functions: start, refactor, plan, etc.)
 function M.start()
 	local prov = providers.get_current()
 	local model_display = prov.model_id or prov.name
