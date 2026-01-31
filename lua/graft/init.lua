@@ -1,4 +1,4 @@
---- @module 'graft'
+--- @module graft
 --- @description Main entry point for the Graft plugin.
 --- This module is responsible for initializing the plugin, setting up user commands,
 --- configuring default keymaps, and exposing the public API.

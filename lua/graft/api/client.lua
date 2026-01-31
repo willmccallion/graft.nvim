@@ -1,5 +1,5 @@
---- @module graft.core.streamer
---- Handles streaming responses from LLM providers and processing them into Neovim buffers.
+--- @module graft.api.client
+--- @brief Handles streaming responses from LLM providers and processing them into Neovim buffers.
 --- Supports both chat-style appending and search-and-replace patching.
 local M = {}
 local Job = require("plenary.job")

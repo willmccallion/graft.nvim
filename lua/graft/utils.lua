@@ -1,4 +1,4 @@
---- @file utils.lua
+--- @module graft.utils
 --- @brief Utility functions for Graft
 ---
 --- This module contains various utility functions used throughout the plugin,

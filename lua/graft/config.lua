@@ -1,4 +1,4 @@
---- @file config.lua
+--- @module graft.config
 --- @brief Configuration and state management for the plugin.
 --- This module defines the default settings, manages API keys from environment variables,
 --- and provides a setup function to merge user configurations.

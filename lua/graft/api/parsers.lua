@@ -1,4 +1,4 @@
---- @module graft.parser
+--- @module graft.api.parsers
 --- @description Handles parsing of streaming responses from LLM providers like Gemini and Ollama.
 local M = {}
 local utils = require("graft.utils")

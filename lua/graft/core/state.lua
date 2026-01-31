@@ -1,7 +1,6 @@
---- @module State
---- @description
---- This module maintains the global state for the plugin. It tracks active jobs,
---- chat history, context files, and ongoing code transactions.
+--- @module graft.core.state
+--- @description Maintains the global state for the plugin.
+--- It tracks active jobs, chat history, context files, and ongoing code transactions.
 ---
 --- The state is used to coordinate between different parts of the plugin,
 --- such as the UI, the LLM client, and the code modification logic.

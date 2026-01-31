@@ -1,5 +1,5 @@
---- @module graft.preview
---- @description Handles the preview window for streaming output in graft.nvim.
+--- @module graft.ui.preview
+--- @description Handles the preview window for streaming output.
 local M = {}
 local config = require("graft.config")
 

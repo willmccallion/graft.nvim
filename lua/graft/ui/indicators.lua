@@ -1,4 +1,4 @@
---- @module graft.ui.loading
+--- @module graft.ui.indicators
 --- @description UI components for displaying loading states and progress indicators.
 local M = {}
 local Popup = require("nui.popup")

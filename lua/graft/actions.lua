@@ -1,4 +1,4 @@
---- @module actions.lua
+--- @module graft.actions
 --- @brief Main UI controller for the Graft plugin.
 ---
 --- This module provides the primary entry points for user interaction with Graft.

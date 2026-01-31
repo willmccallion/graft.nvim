@@ -1,6 +1,6 @@
---- @file context.lua
---- This module provides utilities for capturing and resolving the context
---- of the current editor state, including visual selections and external files.
+--- @module graft.context
+--- @description Utilities for capturing and resolving editor context.
+--- This includes capturing visual selections, external files, and current buffer content.
 local M = {}
 
 local utils = require("graft.utils")
