@@ -13,7 +13,11 @@ function M.save_snapshot(bufnr)
 end
 
 local function normalize_fuzzy(str)
-	local trimmed = str:match("^%s*(.-)%s*$") or ""
+	-- 1. Remove carriage returns
+	local clean = str:gsub("\r", "")
+	-- 2. Trim leading/trailing whitespace
+	local trimmed = clean:match("^%s*(.-)%s*$") or ""
+	-- 3. Collapse internal whitespace to single space (handles tab vs space mismatch)
 	return trimmed:gsub("%s+", " ")
 end
 

@@ -1,5 +1,4 @@
 local M = {}
-
 local components = require("graft.ui.components")
 local indicators = require("graft.ui.indicators")
 local preview = require("graft.ui.preview")
@@ -10,17 +9,38 @@ local state = require("graft.core.state")
 local context_manager = require("graft.context")
 local client = require("graft.api.client")
 
-local PROMPT_REFACTOR = [[You are a diff generation tool. 
-Your ONLY task is to output a UNIFIED DIFF based on the user's instruction.
-STRICT RULES:
-1. Output MUST start immediately with `--- a/filename`.
-2. Followed by `+++ b/filename`.
-3. Followed by the diff hunks starting with `@@ ... @@`.
-4. Do NOT use Markdown code blocks.]]
+-- IMPROVED PROMPT: Forces "Whole Function Replacement" for stability
+local PROMPT_REFACTOR = [[You are an expert coding agent specializing in Unified Diff generation.
+Your task is to modify the provided code based on the user's instruction.
+
+STRICT GENERATION STRATEGY:
+1. **WHOLE FUNCTION REPLACEMENT**: If you need to modify code inside a function, you MUST delete (-) the ENTIRE original function and add (+) the ENTIRE new function.
+   - Do NOT try to patch individual lines inside a function. It causes syntax errors.
+   - Replace the whole block.
+
+2. **SCAN FOR DEPENDENCIES**:
+   - If you change a function signature (e.g., add_task), you MUST scan the entire file for calls to that function (especially in `main`) and update them too.
+   - If you add a new function, ensure it is placed correctly (e.g., before main).
+
+3. **OUTPUT FORMAT**:
+   - Start immediately with `--- a/filename`.
+   - Use standard Unified Diff format.
+   - No Markdown.
+
+Example of Whole Function Replacement:
+@@ ... @@
+-void func(int a) {
+-    printf("Old: %d", a);
+-}
++void func(int a, int b) {
++    printf("New: %d %d", a, b);
++}
+]]
 
 local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - Use Markdown formatting.
-- Be concise.]]
+- Be concise but thorough.
+- When suggesting code, use proper syntax highlighting.]]
 
 -- RECURSIVE DIRECTORY ADDER
 local function add_directory_recursive(dir_path)
@@ -141,7 +161,6 @@ function M.manage_context()
 	end)
 end
 
--- (Keep the rest of your actions.lua functions: start, refactor, plan, etc.)
 function M.start()
 	local prov = providers.get_current()
 	local model_display = prov.model_id or prov.name
@@ -182,7 +201,15 @@ function M.refactor()
 		local context, replace_range, _ = context_manager.resolve(initial_state, prompt_text)
 		local extra_context = context_manager.get_external_context()
 		local target_buf = vim.api.nvim_get_current_buf()
-		local full_prompt = string.format("%s\n\nFILE:\n%s\n\nINSTRUCTION: %s", extra_context, context, prompt_text)
+
+		-- Explicitly label sections for the LLM
+		local full_prompt = string.format(
+			"%s\n\n=== TARGET FILE CONTENT ===\n%s\n\n=== INSTRUCTION ===\n%s",
+			extra_context,
+			context,
+			prompt_text
+		)
+
 		client.stream_to_buffer(prov, full_prompt, target_buf, {
 			replace_range = replace_range,
 			is_chat = false,

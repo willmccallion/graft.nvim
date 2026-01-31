@@ -36,6 +36,9 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local buffer_text = ""
 	local patches_applied = 0
 
+	-- Token tracking (Initialize with 0s)
+	local usage_stats = { input = 0, output = 0, total = 0 }
+
 	local function flush_hunk()
 		if #hunk_ops > 0 then
 			if patcher.apply_patch_block(target_buf, hunk_ops) then
@@ -119,8 +122,15 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 			if not state.is_streaming then
 				return
 			end
-			local content = provider.parse_chunk(data)
-			if not content then
+
+			-- Updated to accept metadata
+			local content, metadata = provider.parse_chunk(data)
+
+			if metadata then
+				usage_stats = metadata
+			end
+
+			if not content or content == "" then
 				return
 			end
 
@@ -152,17 +162,30 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 					table.insert(state.chat_history, { role = "assistant", content = full_response })
 				end
 
+				-- Construct status message with tokens (Defensive checks)
+				local token_msg = ""
+				local t_in = usage_stats.input or 0
+				local t_out = usage_stats.output or 0
+				local t_total = usage_stats.total or (t_in + t_out)
+
+				if t_total > 0 then
+					token_msg = string.format(" [In:%d Out:%d]", t_in, t_out)
+				end
+
 				if is_patch then
 					if patches_applied > 0 then
-						utils.notify("Refactor Complete. Applied " .. patches_applied .. " changes.")
+						utils.notify("Refactor Complete. Applied " .. patches_applied .. " changes." .. token_msg)
 						preview.close()
 					elseif full_response:match("@@") then
 						if patches_applied == 0 then
-							utils.notify("Refactor Failed: Context match error.", vim.log.levels.ERROR)
+							utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
 						end
 					else
-						utils.notify("Refactor Failed: Invalid Diff format.", vim.log.levels.WARN)
+						utils.notify("Refactor Failed: Invalid Diff format." .. token_msg, vim.log.levels.WARN)
 					end
+				else
+					-- Chat completion notification
+					utils.notify("Done." .. token_msg)
 				end
 			end)
 		end,
