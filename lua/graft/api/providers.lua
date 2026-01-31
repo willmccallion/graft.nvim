@@ -56,10 +56,13 @@ local function make_gemini_body(prompt, model, history, system_instruction_text)
 		table.insert(contents, { role = "user", parts = { { text = prompt } } })
 	end
 
+	local is_flash = model:match("flash")
+	local max_tokens = is_flash and 8192 or 1000000
+
 	return vim.fn.json_encode({
 		contents = contents,
 		systemInstruction = sys_prompt,
-		generationConfig = { temperature = 0.0, maxOutputTokens = 8192 },
+		generationConfig = { temperature = 0.0, maxOutputTokens = max_tokens },
 	})
 end
 
@@ -107,7 +110,12 @@ M.list = {
 			else
 				table.insert(messages, { role = "user", content = prompt })
 			end
-			return vim.fn.json_encode({ model = model, messages = messages, stream = true })
+			return vim.fn.json_encode({
+				model = model,
+				messages = messages,
+				stream = true,
+				options = { num_predict = -1 }, -- -1 = infinite/max context
+			})
 		end,
 		parse_chunk = parsers.parse_ollama_chunk,
 	},

@@ -36,11 +36,12 @@ For every modification, output a block in this exact format:
 >>>> END
 
 RULES:
-1. **Context**: Include enough lines in the SEARCH block to uniquely locate the code.
-2. **Accuracy**: The SEARCH block must match the original file content exactly (including whitespace).
-3. **Completeness**: If replacing a function, include the whole function signature in the SEARCH block.
-4. **No Diffs**: Do NOT use Unified Diff format (no +++ or ---).
-5. **No Markdown**: Output the blocks directly without markdown code fences.
+1. **Separator**: Use "==== REPLACE" exactly. Do NOT use "====".
+2. **Context**: Include enough lines in the SEARCH block to uniquely locate the code.
+3. **Accuracy**: The SEARCH block must match the original file content exactly (including whitespace).
+4. **Completeness**: If replacing a function, include the whole function signature in the SEARCH block.
+5. **No Diffs**: Do NOT use Unified Diff format (no +++ or ---).
+6. **No Markdown**: Output the blocks directly without markdown code fences.
 ]]
 
 --- Prompt plan for the Senior Technical Lead persona.
@@ -49,6 +50,58 @@ local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - Use Markdown formatting.
 - Be concise but thorough.
 - When suggesting code, use proper syntax highlighting.]]
+
+--- System prompt for Auto-Documentation.
+--- Updated to strictly enforce the separator format and exhaustiveness.
+local PROMPT_DOCS = [[You are a Documentation Expert.
+Your task is to improve the documentation of the provided code.
+
+CRITICAL INSTRUCTION:
+You MUST document the 'main' function (or the file's entry point).
+Models often skip 'main' because they think it is trivial. THIS IS FORBIDDEN.
+
+STRICT OUTPUT FORMAT:
+You must use this EXACT format for every change. Do not deviate.
+<<<< SEARCH
+[The original code with added documentation comments]
+==== REPLACE
+[The original code with added documentation comments]
+>>>> END
+
+IMPORTANT: The separator is "==== REPLACE". Do NOT use "====".
+
+OBJECTIVES:
+1. **File Header**: Ensure the file has a high-quality file-level docstring.
+2. **Entry Point**: Document 'main' (params, return, execution flow).
+3. **All Functions**: Document EVERY function found in the text, from top to bottom.
+4. **No Logic Changes**: Do NOT change any code logic. Only add/edit comments.
+
+RULES:
+1. **Sequence**: Process the file from top to bottom.
+2. **Atomic Blocks**: Use separate SEARCH/REPLACE blocks for the file header and EACH function.
+3. **Completeness**: Do not stop generating until you have documented the last function in the file.
+]]
+
+--- System prompt for Scope Mode (Function Isolation).
+--- Updated to strictly enforce the separator format.
+local PROMPT_SCOPE = [[You are a specialized coding agent focused on a SINGLE FUNCTION.
+Your task is to refactor or modify ONLY the logic inside the provided function.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[Exact lines from the provided function to replace]
+==== REPLACE
+[The new code]
+>>>> END
+
+IMPORTANT: The separator is "==== REPLACE". Do NOT use "====".
+
+CRITICAL RULES:
+1. **Isolation**: Treat this function as an isolated unit.
+2. **Assumptions**: ASSUME all imports, helper functions, and global constants defined outside this function ALREADY EXIST and work correctly.
+3. **No Side Effects**: Do NOT add imports, do NOT add file-level constants, do NOT modify anything outside this function's scope.
+4. **Signature**: Keep the function signature (name, params) unchanged unless explicitly instructed to refactor the API.
+]]
 
 --- Recursively adds files from a directory to the context.
 --- Skips .git and node_modules directories to avoid cluttering the context.
@@ -185,6 +238,8 @@ function M.start()
 
 	local options = {
 		components.Menu.item("Refactor (Smart Patch)"),
+		components.Menu.item("Scope Refactor (Function)"),
+		components.Menu.item("Auto Document"),
 		components.Menu.item("Plan (Chat Mode)"),
 		components.Menu.item("Context Manager (" .. ctx_count .. ")"),
 		components.Menu.item("Select Model"),
@@ -193,6 +248,10 @@ function M.start()
 	components.select("graft [" .. model_display .. "]", options, function(menu_mode)
 		if menu_mode.text == "Refactor (Smart Patch)" then
 			M.refactor()
+		elseif menu_mode.text == "Scope Refactor (Function)" then
+			M.scope_refactor()
+		elseif menu_mode.text == "Auto Document" then
+			M.document_code()
 		elseif menu_mode.text == "Plan (Chat Mode)" then
 			M.plan()
 		elseif menu_mode.text:match("Context Manager") then
@@ -203,40 +262,101 @@ function M.start()
 	end)
 end
 
---- Initiates the Refactor (Smart Patch) workflow.
---- Verifies the provider, captures the current context, prompts the user for instructions,
---- and streams the AI response to the buffer as a patch.
-function M.refactor()
+--- Helper to execute a patch job.
+--- @param instruction string The user instruction.
+--- @param state_obj table The context state (visual/normal/function).
+--- @param system_prompt_override string|nil Optional system prompt override.
+--- @param content_header_override string|nil Optional override for the content header (e.g., "TARGET FUNCTION").
+local function run_patch_job(instruction, state_obj, system_prompt_override, content_header_override)
 	local prov = providers.get_current()
 	local ok, err = prov:verify()
 	if not ok then
 		utils.notify(err, vim.log.levels.ERROR)
 		return
 	end
+
+	local context, replace_range, _ = context_manager.resolve(state_obj, instruction)
+	local extra_context = context_manager.get_external_context()
+	local target_buf = vim.api.nvim_get_current_buf()
+	local filename = vim.api.nvim_buf_get_name(target_buf)
+	if filename == "" then
+		filename = "[No Name]"
+	else
+		filename = vim.fn.fnamemodify(filename, ":.")
+	end
+
+	local content_header = content_header_override or "TARGET FILE CONTENT"
+
+	local full_prompt = string.format(
+		"%s\n\n=== TARGET FILE: %s ===\n=== %s ===\n%s\n\n=== INSTRUCTION ===\n%s",
+		extra_context,
+		filename,
+		content_header,
+		context,
+		instruction
+	)
+
+	client.stream_to_buffer(prov, full_prompt, target_buf, {
+		replace_range = replace_range,
+		is_chat = false,
+		is_patch = true,
+		model_name = prov.model_id or prov.name,
+		system_prompt = system_prompt_override or PROMPT_REFACTOR,
+	})
+end
+
+--- Initiates the Refactor (Smart Patch) workflow.
+--- Verifies the provider, captures the current context, prompts the user for instructions,
+--- and streams the AI response to the buffer as a patch.
+function M.refactor()
 	local initial_state = context_manager.get_current_state()
 	components.ask("Refactor Instruction", function(prompt_text)
 		if not prompt_text or prompt_text == "" then
 			return
 		end
-		local context, replace_range, _ = context_manager.resolve(initial_state, prompt_text)
-		local extra_context = context_manager.get_external_context()
-		local target_buf = vim.api.nvim_get_current_buf()
-
-		local full_prompt = string.format(
-			"%s\n\n=== TARGET FILE CONTENT ===\n%s\n\n=== INSTRUCTION ===\n%s",
-			extra_context,
-			context,
-			prompt_text
-		)
-
-		client.stream_to_buffer(prov, full_prompt, target_buf, {
-			replace_range = replace_range,
-			is_chat = false,
-			is_patch = true,
-			model_name = prov.model_id or prov.name,
-			system_prompt = PROMPT_REFACTOR,
-		})
+		run_patch_job(prompt_text, initial_state, PROMPT_REFACTOR)
 	end)
+end
+
+--- Initiates the Scope Refactor (Function) workflow.
+--- Targets only the function under the cursor.
+function M.scope_refactor()
+	local initial_state = context_manager.get_current_state("function")
+
+	if initial_state.type == "function" then
+		local buf = vim.api.nvim_get_current_buf()
+		local ns = vim.api.nvim_create_namespace("graft_flash")
+		vim.highlight.range(
+			buf,
+			ns,
+			"Visual",
+			{ initial_state.start_line, 0 },
+			{ initial_state.end_line, -1 },
+			{ regtype = "V", inclusive = true }
+		)
+		vim.defer_fn(function()
+			vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+		end, 500)
+	end
+
+	components.ask("Refactor Function", function(prompt_text)
+		if not prompt_text or prompt_text == "" then
+			return
+		end
+		run_patch_job(prompt_text, initial_state, PROMPT_SCOPE, "TARGET FUNCTION")
+	end)
+end
+
+--- Initiates the Auto Documentation workflow.
+--- Ensures high-quality documentation for the file and all functions.
+function M.document_code()
+	local initial_state = context_manager.get_current_state()
+	utils.notify("Generating documentation... please wait.")
+	run_patch_job(
+		"Document EVERYTHING: File header, structs, typedefs, enums, globals, and ALL functions. You MUST document 'main'.",
+		initial_state,
+		PROMPT_DOCS
+	)
 end
 
 --- Initiates the Plan (Chat Mode) workflow.

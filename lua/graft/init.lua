@@ -52,11 +52,21 @@ function M.setup(user_opts)
 		utils.notify("Chat history cleared.")
 	end, {})
 
+	vim.api.nvim_create_user_command("GraftScope", function()
+		actions.scope_refactor()
+	end, {})
+
+	vim.api.nvim_create_user_command("GraftDoc", function()
+		actions.document_code()
+	end, {})
+
 	if user_opts and user_opts.use_default_keymaps ~= false then
 		vim.keymap.set({ "n", "v" }, "<leader>aa", actions.start, { desc = "Graft: Menu" })
 		vim.keymap.set({ "n", "v" }, "<leader>ar", actions.refactor, { desc = "Graft: Refactor" })
 		vim.keymap.set({ "n", "v" }, "<leader>ap", actions.plan, { desc = "Graft: Plan (Chat)" })
 		vim.keymap.set("n", "<leader>am", actions.select_model, { desc = "Graft: Select Model" })
+		vim.keymap.set("n", "<leader>ag", actions.scope_refactor, { desc = "Graft: Scope Refactor (Function)" })
+		vim.keymap.set("n", "<leader>ad", actions.document_code, { desc = "Graft: Auto Document" })
 
 		vim.keymap.set("n", "<leader>as", function()
 			if client and client.stop_job then
@@ -77,6 +87,12 @@ M.start = actions.start
 
 --- Trigger a refactor action on the selected code or current buffer.
 M.refactor = actions.refactor
+
+--- Trigger a refactor action on the function under cursor.
+M.scope_refactor = actions.scope_refactor
+
+--- Trigger auto-documentation on the current buffer.
+M.document_code = actions.document_code
 
 --- Open the planning/chat interface.
 M.plan = actions.plan

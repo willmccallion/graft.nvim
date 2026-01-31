@@ -83,14 +83,13 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				return
 			elseif line:match("^%s*>>>> END") then
 				if sr_mode == "REPLACE" then
-					if patcher.apply_search_replace(target_buf, search_buffer, replace_buffer) then
+					if patcher.apply_search_replace(target_buf, search_buffer, replace_buffer, opts.replace_range) then
 						patches_applied = patches_applied + 1
 					end
 				end
 				sr_mode = "IDLE"
 				return
 			end
-
 			if sr_mode == "SEARCH" then
 				table.insert(search_buffer, line)
 			elseif sr_mode == "REPLACE" then
@@ -116,13 +115,14 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local headers = type(provider.headers) == "function" and provider.headers() or provider.headers
 	local url = type(provider.url) == "function" and provider.url(provider.model_id) or provider.url
 
-	local args = { "-N", "-X", "POST", url, "-d", body }
+	local args = { "-s", "-S", "-N", "-X", "POST", url, "-d", body }
 	for _, h in ipairs(headers) do
 		table.insert(args, "-H")
 		table.insert(args, h)
 	end
 
 	local full_response = ""
+	local stderr_buffer = ""
 
 	state.job = Job:new({
 		command = "curl",
@@ -152,8 +152,23 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				end
 			end)
 		end,
+		on_stderr = function(_, data)
+			if data then
+				stderr_buffer = stderr_buffer .. data .. "\n"
+			end
+		end,
 		on_exit = function()
 			vim.schedule(function()
+				if full_response == "" and stderr_buffer ~= "" then
+					utils.notify("API Request Failed. Check Preview.", vim.log.levels.ERROR)
+					if not show_preview then
+						local buf, _ = preview.ensure_preview_window()
+						vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(stderr_buffer, "\n"))
+					else
+						preview.log("ERROR: " .. stderr_buffer)
+					end
+				end
+
 				if buffer_text ~= "" then
 					process_line(buffer_text)
 				end
@@ -177,8 +192,16 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 						utils.notify("Refactor Complete. Applied " .. patches_applied .. " changes." .. token_msg)
 						preview.close()
 					elseif full_response:match("<<<< SEARCH") then
+						if not show_preview then
+							local buf, _ = preview.ensure_preview_window()
+							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
+						end
 						utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
 					else
+						if not show_preview then
+							local buf, _ = preview.ensure_preview_window()
+							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
+						end
 						utils.notify(
 							"Refactor Failed: No SEARCH/REPLACE blocks found. Check Preview." .. token_msg,
 							vim.log.levels.WARN
