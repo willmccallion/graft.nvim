@@ -4,12 +4,13 @@ A Neovim plugin for AI-assisted development, focusing on precise code refactorin
 
 ## Features
 
-- **Smart Patching**: Applies AI-generated unified diffs directly to buffers using fuzzy matching and adaptive context resolution.
+- **Smart Patching**: Applies AI-generated unified diffs directly to buffers using fuzzy matching and adaptive context resolution. Whitespace and indentation agnostic.
+- **Whole-Function Replacement**: Uses a "Nuclear" prompt strategy to force complete function rewrites, preventing "lazy" coding (e.g., `// ... rest of code`).
 - **Context Management**: Add specific files or entire directories recursively to provide the LLM with relevant project knowledge.
 - **Multi-Provider Support**: Native integration with Google Gemini (Flash and Pro) and local Ollama instances.
 - **Interactive Chat**: Dedicated split-view interface for architectural planning and technical discussions.
 - **Visual Diffing**: Real-time highlights for additions and virtual text for deletions, allowing for manual review before acceptance.
-- **Streaming UI**: Optional preview window to monitor AI output as it generates.
+- **Stability & Performance**: Robust JSON parsing for streaming responses and defensive token counting to prevent crashes on API errors.
 
 ## Requirements
 
@@ -63,12 +64,14 @@ export GEMINI_API_KEY="your_api_key_here"
 ## Usage
 
 ### Refactor (Smart Patch)
-Trigger the refactor action to provide instructions for the current buffer or a visual selection. The plugin generates a diff and applies it to the buffer. You can then review the changes:
+Trigger the refactor action to provide instructions for the current buffer or a visual selection. Graft uses a "Nuclear" prompt strategy to ensure the AI provides complete, functional code blocks rather than partial snippets. It can handle complex multi-function refactors, such as adding enums and updating all call sites simultaneously.
+
+The plugin generates a diff and applies it to the buffer using fuzzy matching. You can then review the changes:
 - Green highlights indicate added lines.
 - Red virtual text indicates deleted lines.
 
 ### Plan (Chat Mode)
-Open an interactive chat session. If it is the first message in a session, the current buffer and any files in the Context Manager are sent as context.
+Open an interactive chat session. Plan mode is context-aware; it uses the current buffer and any files added via the Context Manager to answer architectural questions or help plan complex features across your codebase.
 
 ### Context Manager
 Manage the files sent to the AI. You can:
