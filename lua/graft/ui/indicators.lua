@@ -1,3 +1,5 @@
+--- @module graft.ui.loading
+--- @description UI components for displaying loading states and progress indicators.
 local M = {}
 local Popup = require("nui.popup")
 local state = require("graft.core.state")
@@ -11,15 +13,20 @@ local spinner_timer = nil
 local loading_popup = nil
 local start_time = 0
 
+--- Returns the namespace ID used for Graft AI highlights.
+--- @return integer The namespace ID.
 function M.get_namespace()
 	return ns_id
 end
 
+--- Starts a loading spinner popup with information about the current AI operation.
+--- @param bufnr integer The buffer ID where the operation is occurring.
+--- @param line integer The line number (currently unused).
+--- @param model_name string|nil The name of the AI model being used.
 function M.start_spinner(bufnr, line, model_name)
 	M.stop_spinner()
 	start_time = vim.loop.hrtime()
 
-	-- Get filename for display
 	local fname = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
 	if fname == "" then
 		fname = "[No Name]"
@@ -31,7 +38,7 @@ function M.start_spinner(bufnr, line, model_name)
 		zindex = 50,
 		position = { row = 1, col = "100%" },
 		anchor = "NE",
-		size = { width = 35, height = 4 }, -- Taller for more info
+		size = { width = 35, height = 4 },
 		border = {
 			style = "rounded",
 			text = { top = " Graft AI " },
@@ -54,7 +61,6 @@ function M.start_spinner(bufnr, line, model_name)
 			local icon = spinner_frames[frame_idx]
 			frame_idx = (frame_idx % #spinner_frames) + 1
 
-			-- Calculate elapsed time
 			local elapsed = (vim.loop.hrtime() - start_time) / 1e9
 			local time_str = string.format("%.1fs", elapsed)
 
@@ -70,6 +76,8 @@ function M.start_spinner(bufnr, line, model_name)
 	)
 end
 
+--- Stops the loading spinner and closes the popup.
+--- @param bufnr integer|nil The buffer ID (optional, currently unused).
 function M.stop_spinner(bufnr)
 	if spinner_timer then
 		spinner_timer:stop()

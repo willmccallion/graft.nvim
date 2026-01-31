@@ -1,9 +1,15 @@
+--- @module graft.preview
+--- @description Handles the preview window for streaming output in graft.nvim.
 local M = {}
 local config = require("graft.config")
 
 M.preview_win = nil
 M.preview_buf = nil
 
+--- Ensures that the preview window and buffer exist.
+--- If they don't exist or are invalid, it creates a new floating window.
+--- @return integer buf The buffer handle.
+--- @return integer win The window handle.
 function M.ensure_preview_window()
 	if M.preview_win and vim.api.nvim_win_is_valid(M.preview_win) then
 		return M.preview_buf, M.preview_win
@@ -39,6 +45,8 @@ function M.ensure_preview_window()
 	return buf, win
 end
 
+--- Appends a message to the preview buffer and scrolls to the bottom.
+--- @param msg string The message to append.
 function M.log(msg)
 	if not config.options.show_preview then
 		return
@@ -68,6 +76,7 @@ function M.log(msg)
 	end
 end
 
+--- Closes the preview window and resets the window handle.
 function M.close()
 	if M.preview_win and vim.api.nvim_win_is_valid(M.preview_win) then
 		vim.api.nvim_win_close(M.preview_win, true)

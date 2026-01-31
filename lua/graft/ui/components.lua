@@ -1,3 +1,5 @@
+--- @module graft.ui.components
+--- UI components for Graft using nui.nvim.
 local M = {}
 local Input = require("nui.input")
 local Menu = require("nui.menu")
@@ -5,10 +7,11 @@ local Split = require("nui.split")
 local Popup = require("nui.popup")
 local state = require("graft.core.state")
 
--- EXPORT Menu so other modules can use Menu.item()
 M.Menu = Menu
 
---- Generic Input Box (Multi-line, Right-aligned, Auto-Insert)
+--- Displays a multi-line popup for user input.
+--- @param title string The title of the popup.
+--- @param on_submit function(text: string) Callback function when input is submitted.
 function M.ask(title, on_submit)
 	local popup = Popup({
 		enter = true,
@@ -20,8 +23,8 @@ function M.ask(title, on_submit)
 				bottom = " [Ctrl+Enter] to Submit ",
 			},
 		},
-		position = { row = "10%", col = "98%" }, -- Right side
-		size = { width = 60, height = 12 }, -- Multi-line height
+		position = { row = "10%", col = "98%" },
+		size = { width = 60, height = 12 },
 		relative = "editor",
 		win_options = {
 			winhighlight = "Normal:Normal,FloatBorder:Normal",
@@ -32,12 +35,10 @@ function M.ask(title, on_submit)
 
 	popup:mount()
 
-	-- Automatically enter Insert mode
 	vim.schedule(function()
 		vim.cmd("startinsert")
 	end)
 
-	-- Function to handle submission
 	local function submit_input()
 		local lines = vim.api.nvim_buf_get_lines(popup.bufnr, 0, -1, false)
 		local text = table.concat(lines, "\n")
@@ -47,18 +48,19 @@ function M.ask(title, on_submit)
 		end
 	end
 
-	-- Keymaps
 	popup:map("n", "<Esc>", function()
 		popup:unmount()
 	end, { noremap = true })
 
-	-- Submit with Ctrl+Enter
 	popup:map("i", "<C-CR>", submit_input, { noremap = true })
 	popup:map("i", "<C-s>", submit_input, { noremap = true })
 	popup:map("n", "<CR>", submit_input, { noremap = true })
 end
 
---- Generic Selection Menu (Right-aligned)
+--- Displays a selection menu.
+--- @param title string The title of the menu.
+--- @param items table List of Menu.item objects.
+--- @param on_select function(item: table) Callback function when an item is selected.
 function M.select(title, items, on_select)
 	local menu = Menu({
 		position = { row = "10%", col = "98%" }, -- Right side
@@ -83,7 +85,9 @@ function M.select(title, items, on_select)
 	menu:mount()
 end
 
---- Helper: Chat Input Box (Recursive for persistence)
+--- Creates a persistent input box at the bottom of a split.
+--- @param split table The nui.split instance.
+--- @param on_submit_cb function(value: string) Callback function when input is submitted.
 function M.create_input_box(split, on_submit_cb)
 	local input
 
@@ -106,7 +110,6 @@ function M.create_input_box(split, on_submit_cb)
 			input:unmount()
 			on_submit_cb(value)
 
-			-- Create a FRESH input box to replace the old one
 			vim.defer_fn(function()
 				M.create_input_box(split, on_submit_cb)
 			end, 20)
@@ -115,7 +118,6 @@ function M.create_input_box(split, on_submit_cb)
 
 	input:mount()
 
-	-- Ensure input closes if the split closes
 	local event_id = vim.api.nvim_create_autocmd("WinClosed", {
 		pattern = tostring(split.winid),
 		callback = function()
@@ -134,9 +136,10 @@ function M.create_input_box(split, on_submit_cb)
 	end)
 end
 
---- Open Chat Interface
+--- Opens a chat window in a split.
+--- @param on_submit function(value: string, bufnr: number) Callback function when input is submitted.
+--- @return number bufnr The buffer number of the chat window.
 function M.open_chat(on_submit)
-	-- Create buffer if it doesn't exist
 	if not state.chat_bufnr or not vim.api.nvim_buf_is_valid(state.chat_bufnr) then
 		state.chat_bufnr = vim.api.nvim_create_buf(false, true)
 		vim.api.nvim_buf_set_option(state.chat_bufnr, "filetype", "markdown")
