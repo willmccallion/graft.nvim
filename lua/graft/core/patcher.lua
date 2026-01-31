@@ -1,3 +1,8 @@
+--- @module graft.core.patcher
+--- @brief Core logic for applying search and replace patches to buffers.
+--- This module provides functionality to fuzzy match search blocks within a buffer
+--- and replace them with new content, while maintaining a snapshot for potential rejection.
+
 local M = {}
 local state = require("graft.core.state")
 local indicators = require("graft.ui.indicators")
