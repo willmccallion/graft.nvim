@@ -73,15 +73,15 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				preview.log(line)
 			end
 
-			if line:match("^<<<< SEARCH") then
+			if line:match("^%s*<<<< SEARCH") then
 				sr_mode = "SEARCH"
 				search_buffer = {}
 				return
-			elseif line:match("^==== REPLACE") then
+			elseif line:match("^%s*==== REPLACE") then
 				sr_mode = "REPLACE"
 				replace_buffer = {}
 				return
-			elseif line:match("^>>>> END") then
+			elseif line:match("^%s*>>>> END") then
 				if sr_mode == "REPLACE" then
 					if patcher.apply_search_replace(target_buf, search_buffer, replace_buffer) then
 						patches_applied = patches_applied + 1

@@ -1,5 +1,7 @@
 --- @module graft.ui.components
---- UI components for Graft using nui.nvim.
+--- UI components for Graft, including popups, menus, and chat interfaces.
+--- This module provides abstractions over NUI components for consistent UI across the plugin.
+
 local M = {}
 local Input = require("nui.input")
 local Menu = require("nui.menu")
@@ -9,9 +11,9 @@ local state = require("graft.core.state")
 
 M.Menu = Menu
 
---- Displays a multi-line popup for user input.
---- @param title string The title of the popup.
---- @param on_submit function(text: string) Callback function when input is submitted.
+--- Creates a popup input box to prompt the user for text.
+--- @param title string The title of the input box.
+--- @param on_submit function(text: string) Callback executed when user submits text.
 function M.ask(title, on_submit)
 	local popup = Popup({
 		enter = true,
@@ -44,12 +46,14 @@ function M.ask(title, on_submit)
 		local text = table.concat(lines, "\n")
 		if text:match("%S") then
 			popup:unmount()
+			vim.cmd("stopinsert")
 			on_submit(text)
 		end
 	end
 
 	popup:map("n", "<Esc>", function()
 		popup:unmount()
+		vim.cmd("stopinsert")
 	end, { noremap = true })
 
 	popup:map("i", "<C-CR>", submit_input, { noremap = true })
@@ -57,10 +61,10 @@ function M.ask(title, on_submit)
 	popup:map("n", "<CR>", submit_input, { noremap = true })
 end
 
---- Displays a selection menu.
+--- Creates a selection menu.
 --- @param title string The title of the menu.
---- @param items table List of Menu.item objects.
---- @param on_select function(item: table) Callback function when an item is selected.
+--- @param items table[] A list of NUI Menu items.
+--- @param on_select function(item: table) Callback executed when an item is selected.
 function M.select(title, items, on_select)
 	local menu = Menu({
 		position = { row = "10%", col = "98%" }, -- Right side
@@ -85,9 +89,9 @@ function M.select(title, items, on_select)
 	menu:mount()
 end
 
---- Creates a persistent input box at the bottom of a split.
---- @param split table The nui.split instance.
---- @param on_submit_cb function(value: string) Callback function when input is submitted.
+--- Creates a persistent input box at the bottom of a split window (used for Chat).
+--- @param split table The NUI split object to attach to.
+--- @param on_submit_cb function(value: string) Callback executed on submission.
 function M.create_input_box(split, on_submit_cb)
 	local input
 
@@ -131,13 +135,12 @@ function M.create_input_box(split, on_submit_cb)
 	vim.schedule(function()
 		if input.winid and vim.api.nvim_win_is_valid(input.winid) then
 			vim.api.nvim_set_current_win(input.winid)
-			vim.cmd("startinsert")
 		end
 	end)
 end
 
---- Opens a chat window in a split.
---- @param on_submit function(value: string, bufnr: number) Callback function when input is submitted.
+--- Opens the Chat interface in a split window.
+--- @param on_submit function(text: string, bufnr: number) Callback for handling user messages.
 --- @return number bufnr The buffer number of the chat window.
 function M.open_chat(on_submit)
 	if not state.chat_bufnr or not vim.api.nvim_buf_is_valid(state.chat_bufnr) then
