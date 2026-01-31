@@ -230,13 +230,16 @@ function M.plan()
 	local initial_state = context_manager.get_current_state()
 	components.open_chat(function(user_input, chat_buf)
 		local line_count = vim.api.nvim_buf_line_count(chat_buf)
-		vim.api.nvim_buf_set_lines(
-			chat_buf,
-			line_count,
-			line_count,
-			false,
-			{ "", "## User", user_input, "", "## graft" }
-		)
+
+		-- FIX: Split input into lines to prevent "item contains newlines" error
+		local input_lines = vim.split(user_input, "\n")
+		local lines_to_add = { "", "## User" }
+		vim.list_extend(lines_to_add, input_lines)
+		table.insert(lines_to_add, "")
+		table.insert(lines_to_add, "## graft")
+
+		vim.api.nvim_buf_set_lines(chat_buf, line_count, line_count, false, lines_to_add)
+
 		local prompt_to_send = user_input
 		if #state.chat_history == 0 then
 			local context, _, _ = context_manager.resolve(initial_state, user_input)
