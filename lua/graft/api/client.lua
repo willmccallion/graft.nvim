@@ -1,3 +1,6 @@
+--- @module graft.core.streamer
+--- Handles streaming responses from LLM providers and processing them into Neovim buffers.
+--- Supports both chat-style appending and search-and-replace patching.
 local M = {}
 local Job = require("plenary.job")
 local state = require("graft.core.state")
@@ -8,6 +11,7 @@ local indicators = require("graft.ui.indicators")
 local patcher = require("graft.core.patcher")
 local parsers = require("graft.api.parsers")
 
+--- Stops the currently active streaming job and cleans up UI indicators.
 function M.stop_job()
 	if state.job then
 		state.job:shutdown()
@@ -17,6 +21,16 @@ function M.stop_job()
 	state.is_streaming = false
 end
 
+--- Initiates a streaming request to an LLM provider and processes the output.
+--- @param provider table The provider configuration (e.g., OpenAI, Anthropic).
+--- @param prompt string The user prompt to send.
+--- @param target_buf number The buffer handle where output should be directed.
+--- @param opts table Configuration options:
+---   - is_chat (boolean): Whether this is a chat interaction.
+---   - is_patch (boolean): Whether this is a code refactoring/patching operation.
+---   - model_name (string): Name of the model being used.
+---   - system_prompt (string): Optional system prompt.
+---   - replace_range (table): Optional [start, end] line range for patching.
 function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local is_chat = opts.is_chat or false
 	local is_patch = opts.is_patch or false
@@ -24,7 +38,6 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 	parsers.reset()
 
-	-- DEBUG OVERRIDE: Always show preview if Debug Mode is ON
 	local show_preview = config.options.show_preview or config.options.debug
 
 	if is_patch and show_preview then
@@ -35,14 +48,12 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local output_buf = target_buf
 	local current_line_idx = is_chat and vim.api.nvim_buf_line_count(target_buf) or 0
 
-	-- Search/Replace State Machine
-	local sr_mode = "IDLE" -- IDLE, SEARCH, REPLACE
+	local sr_mode = "IDLE"
 	local search_buffer = {}
 	local replace_buffer = {}
 	local buffer_text = ""
 	local patches_applied = 0
 
-	-- Token tracking
 	local usage_stats = { input = 0, output = 0, total = 0 }
 
 	local function process_line(line)
@@ -58,12 +69,10 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				end)
 			end
 		elseif is_patch then
-			-- LOGGING: If in debug mode or preview is on, log everything
 			if show_preview then
 				preview.log(line)
 			end
 
-			-- 1. Detect Block Markers
 			if line:match("^<<<< SEARCH") then
 				sr_mode = "SEARCH"
 				search_buffer = {}
@@ -82,7 +91,6 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				return
 			end
 
-			-- 2. Collect Lines
 			if sr_mode == "SEARCH" then
 				table.insert(search_buffer, line)
 			elseif sr_mode == "REPLACE" then
@@ -171,7 +179,6 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 					elseif full_response:match("<<<< SEARCH") then
 						utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
 					else
-						-- Now that we log everything, this error is more helpful
 						utils.notify(
 							"Refactor Failed: No SEARCH/REPLACE blocks found. Check Preview." .. token_msg,
 							vim.log.levels.WARN

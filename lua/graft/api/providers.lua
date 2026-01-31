@@ -1,27 +1,44 @@
+--- @module graft.api.providers
+--- @brief Provider configurations and utilities for LLM interactions.
+--- This module defines how to interact with different LLM providers (Gemini, Ollama, etc.),
+--- including request formatting, URL generation, and response parsing.
+
 local M = {}
 local utils = require("graft.utils")
 local config = require("graft.config")
 local parsers = require("graft.api.parsers")
 
+--- Retrieves the Gemini API key from environment variables.
+--- @return string|nil The API key if found, nil otherwise.
 local function get_key()
 	return os.getenv("GEMINI_API_KEY")
 end
 
+--- Generates the streaming API URL for a specific Gemini model.
+--- @param model string The model identifier.
+--- @return string The full API endpoint URL.
 local function get_url(model)
 	return "https://generativelanguage.googleapis.com/v1beta/models/" .. model .. ":streamGenerateContent"
 end
 
+--- Constructs the HTTP headers required for Gemini API requests.
+--- @return table A list of header strings.
 local function get_headers()
 	local key = get_key() or ""
 	return { "Content-Type: application/json", "x-goog-api-key: " .. key }
 end
 
+--- Constructs the JSON request body for Gemini API calls.
+--- @param prompt string The user prompt.
+--- @param model string The model identifier.
+--- @param history table|nil Optional conversation history.
+--- @param system_instruction_text string|nil Optional system instruction override.
+--- @return string JSON encoded request body.
 local function make_gemini_body(prompt, model, history, system_instruction_text)
 	utils.debug_log("--- NEW REQUEST START ---")
 
 	local contents = {}
 
-	-- Default prompt if none provided (Fallback)
 	local default_sys =
 		"You are a coding agent. Output UNIFIED DIFF format only. Start immediately with '---'. Do NOT use Markdown."
 	local sys_text = system_instruction_text or default_sys
@@ -36,7 +53,6 @@ local function make_gemini_body(prompt, model, history, system_instruction_text)
 			end
 		end
 	else
-		-- Refactor Mode falls through here (empty history) -> Uses prompt directly
 		table.insert(contents, { role = "user", parts = { { text = prompt } } })
 	end
 
@@ -47,6 +63,17 @@ local function make_gemini_body(prompt, model, history, system_instruction_text)
 	})
 end
 
+--- Registry of supported LLM providers.
+--- @type table<string, Provider>
+---
+--- @class Provider
+--- @field name string Display name.
+--- @field model_id string|nil Internal model identifier.
+--- @field url string API endpoint.
+--- @field headers table HTTP headers.
+--- @field verify function Function to check if the provider is available/configured.
+--- @field make_body function(prompt: string, model: string, history: table|nil, system_instruction_text: string|nil): string Function to format the request payload.
+--- @field parse_chunk function(chunk: string): string|nil Function to parse streaming response chunks.
 M.list = {
 	ollama = {
 		name = "Ollama",
@@ -118,6 +145,9 @@ M.list = {
 	},
 }
 
+--- Retrieves the currently active provider based on configuration.
+--- It also refreshes dynamic fields (like headers/URLs) for Gemini providers.
+--- @return Provider The provider configuration object.
 function M.get_current()
 	local key = config.state.current_provider or config.options.default_provider or "gemini_flash"
 	if not M.list[key] then

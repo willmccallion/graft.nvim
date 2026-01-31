@@ -1,13 +1,20 @@
+--- @module graft.parser
+--- @description Handles parsing of streaming responses from LLM providers like Gemini and Ollama.
 local M = {}
 local utils = require("graft.utils")
 
 local chunk_buffer = ""
 
+--- Resets the internal buffer used for stream parsing.
 function M.reset()
 	chunk_buffer = ""
 end
 
--- Returns: text (string|nil), metadata (table|nil)
+--- Parses a chunk of data from a Gemini API stream.
+--- Handles partial JSON chunks and extracts text and usage metadata.
+--- @param data string Raw data chunk from the stream.
+--- @return string|nil text Extracted and cleaned text.
+--- @return table|nil metadata Token usage statistics.
 function M.parse_gemini_stream(data)
 	if not data or data == "" then
 		return nil, nil
@@ -17,20 +24,15 @@ function M.parse_gemini_stream(data)
 	local accumulated_text = ""
 	local metadata = nil
 
-	-- Loop to process ALL complete objects in the buffer
 	while true do
-		-- 1. Clean leading junk (whitespace, comma, bracket)
 		local clean_start = chunk_buffer:match("^%s*[%[%,]%s*(.*)")
 		if clean_start then
 			chunk_buffer = clean_start
 		end
 
-		-- Trim leading whitespace
 		chunk_buffer = chunk_buffer:gsub("^%s+", "")
 
-		-- 2. Check for Start of Object
 		if chunk_buffer:sub(1, 1) ~= "{" then
-			-- If we see a closing bracket alone, the stream is likely done
 			if chunk_buffer:match("^%]") then
 				chunk_buffer = ""
 				utils.debug_log("[END] Stream finished.")
@@ -38,7 +40,6 @@ function M.parse_gemini_stream(data)
 			break
 		end
 
-		-- 3. Robust JSON Finder
 		local match_found = false
 		local p = 0
 
@@ -52,13 +53,10 @@ function M.parse_gemini_stream(data)
 			local ok, decoded = pcall(vim.json.decode, potential_json)
 
 			if ok then
-				-- SUCCESS: We found a valid JSON object
 				match_found = true
 
-				-- Remove this object from buffer
 				chunk_buffer = chunk_buffer:sub(p + 1)
 
-				-- Extract Text
 				if decoded.candidates and decoded.candidates[1].content then
 					local parts = decoded.candidates[1].content.parts
 					if parts and parts[1] and parts[1].text then
@@ -66,8 +64,6 @@ function M.parse_gemini_stream(data)
 					end
 				end
 
-				-- Extract Token Usage (Gemini usually sends this in the last chunk)
-				-- FIX: Added 'or 0' to prevent nil errors if API omits fields
 				if decoded.usageMetadata then
 					metadata = {
 						input = decoded.usageMetadata.promptTokenCount or 0,
@@ -77,20 +73,16 @@ function M.parse_gemini_stream(data)
 				end
 
 				if decoded.error then
-					-- FIX: Wrap UI notification in schedule to prevent E5560
 					vim.schedule(function()
 						utils.notify("Gemini API Error: " .. decoded.error.message, vim.log.levels.ERROR)
 					end)
 				end
 
-				-- Break inner loop to process next object in outer loop
 				break
 			end
 		end
 
 		if not match_found then
-			-- We ran out of '}' but didn't find a valid object yet.
-			-- Wait for more network data.
 			break
 		end
 	end
@@ -99,18 +91,19 @@ function M.parse_gemini_stream(data)
 		return nil, nil
 	end
 
-	-- Clean formatting (optional, but keeps diffs clean)
 	local clean_text = accumulated_text:gsub("^```%w*%s*", ""):gsub("%s*```$", ""):gsub("^Here is the code:%s*", "")
 
 	return clean_text, metadata
 end
 
--- Returns: text (string|nil), metadata (table|nil)
+--- Parses a single JSON chunk from an Ollama API stream.
+--- @param data string Raw JSON string from Ollama.
+--- @return string|nil content Extracted message content.
+--- @return table|nil metadata Token usage statistics if the stream is complete.
 function M.parse_ollama_chunk(data)
 	local ok, decoded = pcall(vim.json.decode, data)
 	if ok then
 		local meta = nil
-		-- Ollama sends stats in the final response where done=true
 		if decoded.done and decoded.prompt_eval_count then
 			meta = {
 				input = decoded.prompt_eval_count or 0,
@@ -123,7 +116,6 @@ function M.parse_ollama_chunk(data)
 			return decoded.message.content, meta
 		end
 
-		-- Return just metadata if it's the final frame without content
 		if meta then
 			return "", meta
 		end
