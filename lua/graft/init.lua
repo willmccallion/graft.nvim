@@ -72,8 +72,8 @@ function M.setup(user_opts)
 		vim.keymap.set("n", "<leader>am", actions.select_model, { desc = "Graft: Select Model" })
 		vim.keymap.set("n", "<leader>ag", actions.scope_refactor, { desc = "Graft: Scope Refactor (Function)" })
 
-		-- Updated Keymap: ad triggers selection documentation
 		vim.keymap.set({ "n", "v" }, "<leader>ad", actions.document_selection, { desc = "Graft: Doc Selection" })
+		vim.keymap.set({ "n", "v" }, "<leader>ah", actions.document_file_header, { desc = "Graft: Doc Header" })
 
 		vim.keymap.set("n", "<leader>as", function()
 			if client and client.stop_job then
@@ -85,9 +85,6 @@ function M.setup(user_opts)
 		vim.keymap.set("n", "<leader>an", ":GraftReject<CR>", { desc = "Graft: [A]ccept [N]o (Reject)" })
 	end
 end
-
---- Public API exports
---- These functions are exposed for programmatic use or mapping.
 
 --- Start the Graft main menu or action selection.
 M.start = actions.start
