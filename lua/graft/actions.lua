@@ -13,7 +13,6 @@ local context_manager = require("graft.context")
 local client = require("graft.api.client")
 
 --- System prompt for the Refactor (Smart Patch) workflow.
---- STRICTLY FORBIDS COMMENTS unless requested.
 local PROMPT_REFACTOR = [[You are an expert coding agent.
 Your task is to modify the provided code based on the user's instruction using Search and Replace blocks.
 
@@ -43,74 +42,6 @@ local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - When suggesting code, use proper syntax highlighting.
 - If providing code examples, keep them minimal and focused.]]
 
---- System prompt for File Header Documentation.
---- Enforces standard Doxygen @file style.
-local PROMPT_DOC_HEADER = [[You are a Documentation Expert.
-Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
-
-STRICT OUTPUT FORMAT:
-<<<< SEARCH
-[The first few lines of the file (imports, package declaration, or existing header)]
-==== REPLACE
-[A high-quality file header comment block]
-[The original first few lines of the file]
->>>> END
-
-RULES:
-1. **Scope**: ONLY touch the top of the file.
-2. **Style**: Use Doxygen style (`/** ... */`) or the language equivalent.
-3. **Tags**: Include `@file`, `@brief`, and `@author` (if known, otherwise omit).
-4. **Content**: Describe the file's architectural role and key responsibilities.
-5. **Preservation**: You must include the original imports/package lines in the REPLACE block so they are not deleted.
-]]
-
---- System prompt for Selection Documentation.
---- STRICTLY enforces consistent style between Structs (inline) and Functions (block).
-local PROMPT_DOC_SELECTION = [[You are a Documentation Expert.
-Your task is to document the SPECIFIC code block provided.
-
-STRICT OUTPUT FORMAT:
-<<<< SEARCH
-[The exact code block provided in the selection]
-==== REPLACE
-[The documented code block]
->>>> END
-
-STYLE GUIDE (STRICT):
-
-CASE 1: STRUCTS, UNIONS, ENUMS
-- Place a `/** @brief Description */` block ABOVE the definition.
-- Document EVERY member/field using `///< Description` on the same line (or the line below if long).
-- Do NOT use `@param` inside a struct definition.
-
-Example Struct:
-/** @brief Represents a 2D point. */
-typedef struct {
-    int x; ///< The X coordinate.
-    int y; ///< The Y coordinate.
-} point_t;
-
-CASE 2: FUNCTIONS
-- Place a `/** ... */` block ABOVE the function prototype.
-- Use `@brief` for the summary.
-- Use `@param [name] [description]` for arguments.
-- Use `@return [description]` for return values.
-
-Example Function:
-/**
- * @brief Calculates the sum.
- * @param a First number.
- * @param b Second number.
- * @return The sum of a and b.
- */
-int add(int a, int b);
-
-RULES:
-1. **Consistency**: Apply this style to ALL types found in the selection.
-2. **No Logic Changes**: Do not modify the actual code logic, only add comments.
-3. **Coverage**: Do not leave any member or parameter undocumented.
-]]
-
 --- System prompt for Scope Mode (Function Isolation).
 local PROMPT_SCOPE = [[You are a specialized coding agent focused on a SINGLE FUNCTION.
 Your task is to refactor or modify ONLY the logic inside the provided function.
@@ -130,6 +61,126 @@ CRITICAL RULES:
 3. **No Side Effects**: Do NOT add imports, do NOT add file-level constants, do NOT modify anything outside this function's scope.
 4. **Signature**: Keep the function signature (name, params) unchanged unless explicitly instructed to refactor the API.
 5. **NO COMMENTS**: Do NOT add comments, docstrings, Doxygen, or explanations unless the user explicitly asks for them. Output raw, functional code only.
+]]
+
+local DOC_HEADER_DEFAULT = [[You are a Documentation Expert.
+Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The first few lines of the file (imports, package declaration, or existing header)]
+==== REPLACE
+[A high-quality file header comment block]
+[The original first few lines of the file]
+>>>> END
+
+RULES:
+1. **Scope**: ONLY touch the top of the file.
+2. **Style**: Use Doxygen style (`/** ... */`) or the language equivalent.
+3. **Tags**: Include `@file`, `@brief`, and `@author` (if known, otherwise omit).
+4. **Content**: Describe the file's architectural role and key responsibilities.
+5. **Preservation**: You must include the original imports/package lines in the REPLACE block so they are not deleted.
+]]
+
+local DOC_SELECTION_DEFAULT = [[You are a Documentation Expert.
+Your task is to document the SPECIFIC code block provided.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The exact code block provided in the selection]
+==== REPLACE
+[The documented code block]
+>>>> END
+
+STYLE GUIDE (STRICT):
+
+CASE 1: STRUCTS, UNIONS, ENUMS
+- Place a `/** @brief Description */` block ABOVE the definition.
+- Document EVERY member/field using `///< Description` on the same line (or the line below if long).
+- Do NOT use `@param` inside a struct definition.
+
+CASE 2: FUNCTIONS
+- Place a `/** ... */` block ABOVE the function prototype.
+- Use `@brief` for the summary.
+- Use `@param [name] [description]` for arguments.
+- Use `@return [description]` for return values.
+
+RULES:
+1. **Consistency**: Apply this style to ALL types found in the selection.
+2. **No Logic Changes**: Do not modify the actual code logic, only add comments.
+3. **Coverage**: Do not leave any member or parameter undocumented.
+]]
+
+local DOC_HEADER_RUST = [[You are a Rust Documentation Expert.
+Your task is to add or update the MODULE-LEVEL documentation at the very top of the file.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The first few lines of the file]
+==== REPLACE
+[The module documentation]
+[The original first few lines]
+>>>> END
+
+STYLE GUIDE (RUST):
+1. **Syntax**: Use `//!` for module-level documentation.
+2. **Content**: Provide a high-level summary of the module's purpose.
+3. **No Tags**: Do NOT use `@file` or `@brief`. Use standard Markdown.
+
+Example:
+//! # Module Name
+//!
+//! Brief description of what this module does.
+//!
+//! ## Usage
+//! ...
+]]
+
+local DOC_SELECTION_RUST = [[You are a Rust Documentation Expert.
+Your task is to document the SPECIFIC code block provided using idiomatic Rustdoc.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The exact code block provided in the selection]
+==== REPLACE
+[The documented code block]
+>>>> END
+
+STYLE GUIDE (RUST):
+
+CASE 1: STRUCTS & ENUMS
+- Place `///` comments ABOVE the struct/enum definition.
+- Place `///` comments ABOVE each field. Do NOT use `///<` (trailing comments).
+
+Example:
+/// Represents a user in the system.
+struct User {
+    /// The user's unique ID.
+    id: usize,
+}
+
+CASE 2: FUNCTIONS
+- Place `///` comments ABOVE the function signature.
+- Use Markdown sections for arguments and return values.
+- Do NOT use `@param` or `@return`.
+
+Example:
+/// Calculates the sum of two numbers.
+///
+/// # Arguments
+///
+/// * `a` - The first number.
+/// * `b` - The second number.
+///
+/// # Returns
+///
+/// The sum of `a` and `b`.
+fn add(a: i32, b: i32) -> i32 { ... }
+
+RULES:
+1. **Idiomatic**: Use standard Rustdoc (`///`).
+2. **No Logic Changes**: Do not modify code logic.
+3. **Coverage**: Document all public fields and arguments.
 ]]
 
 --- Recursively adds files from a directory to the context.
@@ -367,11 +418,18 @@ end
 --- Generates a File Header for the current file.
 function M.document_file_header()
 	local initial_state = context_manager.get_current_state()
-	utils.notify("Generating file header...")
+	local ft = vim.bo.filetype
+
+	local prompt = DOC_HEADER_DEFAULT
+	if ft == "rust" then
+		prompt = DOC_HEADER_RUST
+	end
+
+	utils.notify("Generating file header (" .. ft .. ")...")
 	run_patch_job(
 		"Analyze the file content and generate a comprehensive file-level header comment.",
 		initial_state,
-		PROMPT_DOC_HEADER,
+		prompt,
 		"FULL FILE CONTENT"
 	)
 end
@@ -385,8 +443,14 @@ function M.document_selection()
 		return
 	end
 
-	utils.notify("Documenting selection...")
-	run_patch_job("Add documentation comments to this selection.", initial_state, PROMPT_DOC_SELECTION, "SELECTED CODE")
+	local ft = vim.bo.filetype
+	local prompt = DOC_SELECTION_DEFAULT
+	if ft == "rust" then
+		prompt = DOC_SELECTION_RUST
+	end
+
+	utils.notify("Documenting selection (" .. ft .. ")...")
+	run_patch_job("Add documentation comments to this selection.", initial_state, prompt, "SELECTED CODE")
 end
 
 --- Initiates the Plan (Chat Mode) workflow.
