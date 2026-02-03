@@ -1,13 +1,5 @@
 --- @module graft.actions
 --- @brief Main UI controller for the Graft plugin.
----
---- This module provides the primary entry points for user interaction with Graft.
---- It handles:
---- - Context management (adding files/directories to AI context).
---- - Refactor workflow (generating smart patches for code modification).
---- - Plan workflow (interactive chat for architectural planning).
---- - Model and provider selection.
---- - Transaction management (accepting/rejecting AI-generated changes).
 local M = {}
 
 local components = require("graft.ui.components")
@@ -21,7 +13,6 @@ local context_manager = require("graft.context")
 local client = require("graft.api.client")
 
 --- System prompt for the Refactor (Smart Patch) workflow.
---- Instructs the AI to generate Search/Replace blocks instead of Diffs.
 --- STRICTLY FORBIDS COMMENTS unless requested.
 local PROMPT_REFACTOR = [[You are an expert coding agent.
 Your task is to modify the provided code based on the user's instruction using Search and Replace blocks.
@@ -46,7 +37,6 @@ RULES:
 ]]
 
 --- Prompt plan for the Senior Technical Lead persona.
---- Defines formatting rules and communication style.
 local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - Use Markdown formatting.
 - Be concise but thorough.
@@ -54,7 +44,7 @@ local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - If providing code examples, keep them minimal and focused.]]
 
 --- System prompt for File Header Documentation.
---- Focused on Architecture, Ownership, and High-Level Purpose.
+--- Enforces standard Doxygen @file style.
 local PROMPT_DOC_HEADER = [[You are a Documentation Expert.
 Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
 
@@ -67,36 +57,61 @@ STRICT OUTPUT FORMAT:
 >>>> END
 
 RULES:
-1. **Scope**: ONLY touch the top of the file. Do NOT document functions or classes further down.
-2. **Content**: Describe the file's architectural role, key responsibilities, and any global assumptions.
-3. **Format**: Use the standard comment style for the language (e.g., `///` or `/**` for C/C++/Rust, `#` for Python, `---` for Lua).
-4. **Standard**: Follow the language's standard documentation convention (e.g., Doxygen, JSDoc, GoDoc).
+1. **Scope**: ONLY touch the top of the file.
+2. **Style**: Use Doxygen style (`/** ... */`) or the language equivalent.
+3. **Tags**: Include `@file`, `@brief`, and `@author` (if known, otherwise omit).
+4. **Content**: Describe the file's architectural role and key responsibilities.
 5. **Preservation**: You must include the original imports/package lines in the REPLACE block so they are not deleted.
 ]]
 
 --- System prompt for Selection Documentation.
---- Focused on Contracts: Parameters, Returns, and Errors.
+--- STRICTLY enforces consistent style between Structs (inline) and Functions (block).
 local PROMPT_DOC_SELECTION = [[You are a Documentation Expert.
-Your task is to document the SPECIFIC code block provided (Function, Struct, Enum, or Class).
+Your task is to document the SPECIFIC code block provided.
 
 STRICT OUTPUT FORMAT:
 <<<< SEARCH
 [The exact code block provided in the selection]
 ==== REPLACE
-[The documentation comment (Docstring/JSDoc/LuaDoc/Doxygen)]
-[The original code block]
+[The documented code block]
 >>>> END
 
+STYLE GUIDE (STRICT):
+
+CASE 1: STRUCTS, UNIONS, ENUMS
+- Place a `/** @brief Description */` block ABOVE the definition.
+- Document EVERY member/field using `///< Description` on the same line (or the line below if long).
+- Do NOT use `@param` inside a struct definition.
+
+Example Struct:
+/** @brief Represents a 2D point. */
+typedef struct {
+    int x; ///< The X coordinate.
+    int y; ///< The Y coordinate.
+} point_t;
+
+CASE 2: FUNCTIONS
+- Place a `/** ... */` block ABOVE the function prototype.
+- Use `@brief` for the summary.
+- Use `@param [name] [description]` for arguments.
+- Use `@return [description]` for return values.
+
+Example Function:
+/**
+ * @brief Calculates the sum.
+ * @param a First number.
+ * @param b Second number.
+ * @return The sum of a and b.
+ */
+int add(int a, int b);
+
 RULES:
-1. **Scope**: Document ONLY the provided selection.
-2. **Detail**: Explicitly document parameters (`@param`), return values (`@return`), and potential errors/exceptions (`@throws`).
-3. **Clean Code**: Do NOT add inline comments inside the function body. ONLY add the documentation block above the definition.
-4. **Style**: Use standard conventions (JSDoc, GoDoc, Rustdoc, Doxygen) optimized for IDE tooltips.
-5. **Logic**: Do NOT change the code logic.
+1. **Consistency**: Apply this style to ALL types found in the selection.
+2. **No Logic Changes**: Do not modify the actual code logic, only add comments.
+3. **Coverage**: Do not leave any member or parameter undocumented.
 ]]
 
 --- System prompt for Scope Mode (Function Isolation).
---- Strictly enforces isolation and forbids comments.
 local PROMPT_SCOPE = [[You are a specialized coding agent focused on a SINGLE FUNCTION.
 Your task is to refactor or modify ONLY the logic inside the provided function.
 
@@ -118,8 +133,6 @@ CRITICAL RULES:
 ]]
 
 --- Recursively adds files from a directory to the context.
---- Skips .git and node_modules directories to avoid cluttering the context.
---- @param dir_path string: The path to the directory to add.
 local function add_directory_recursive(dir_path)
 	local abs_dir = vim.fn.fnamemodify(dir_path, ":p")
 	if vim.fn.isdirectory(abs_dir) == 0 then
@@ -140,8 +153,6 @@ local function add_directory_recursive(dir_path)
 end
 
 --- Opens a Telescope picker to select a directory for context.
---- Falls back to manual input if Telescope is not installed.
---- @param callback function: The function to call with the selected directory path.
 local function select_dir_telescope(callback)
 	local has_tel, _ = pcall(require, "telescope")
 	if not has_tel then
@@ -176,8 +187,6 @@ local function select_dir_telescope(callback)
 end
 
 --- Opens the Context Manager menu.
---- Allows the user to add files (supports multi-select via Telescope), add directories,
---- clear the current context, or return to the main menu.
 function M.manage_context()
 	local ctx_label = "Context Manager (" .. #state.context_files .. " files)"
 	local options = {
@@ -243,8 +252,6 @@ function M.manage_context()
 end
 
 --- Starts the main Graft interface.
---- Displays the main menu with options for Refactor, Plan, Context Manager, and Model Selection.
---- This is the primary entry point for the plugin's UI.
 function M.start()
 	local prov = providers.get_current()
 	local model_display = prov.model_id or prov.name
@@ -280,10 +287,6 @@ function M.start()
 end
 
 --- Helper to execute a patch job.
---- @param instruction string The user instruction.
---- @param state_obj table The context state (visual/normal/function).
---- @param system_prompt_override string|nil Optional system prompt override.
---- @param content_header_override string|nil Optional override for the content header (e.g., "TARGET FUNCTION").
 local function run_patch_job(instruction, state_obj, system_prompt_override, content_header_override)
 	local prov = providers.get_current()
 	local ok, err = prov:verify()
@@ -323,8 +326,6 @@ local function run_patch_job(instruction, state_obj, system_prompt_override, con
 end
 
 --- Initiates the Refactor (Smart Patch) workflow.
---- Verifies the provider, captures the current context, prompts the user for instructions,
---- and streams the AI response to the buffer as a patch.
 function M.refactor()
 	local initial_state = context_manager.get_current_state()
 	components.ask("Refactor Instruction", function(prompt_text)
@@ -336,7 +337,6 @@ function M.refactor()
 end
 
 --- Initiates the Scope Refactor (Function) workflow.
---- Targets only the function under the cursor.
 function M.scope_refactor()
 	local initial_state = context_manager.get_current_state("function")
 
@@ -366,8 +366,6 @@ end
 
 --- Generates a File Header for the current file.
 function M.document_file_header()
-	-- We pass 'normal' state to get the full file context,
-	-- but the prompt instructs to only touch the top.
 	local initial_state = context_manager.get_current_state()
 	utils.notify("Generating file header...")
 	run_patch_job(
@@ -392,8 +390,6 @@ function M.document_selection()
 end
 
 --- Initiates the Plan (Chat Mode) workflow.
---- Opens a dedicated chat buffer and streams the conversation with the AI model.
---- Handles chat history and context resolution for the first message.
 function M.plan()
 	local prov = providers.get_current()
 	local ok, err = prov:verify()
@@ -429,7 +425,6 @@ function M.plan()
 end
 
 --- Opens a menu to select the AI provider and model.
---- Supports switching between configured providers (e.g., OpenAI, Anthropic) and selecting specific Ollama models.
 function M.select_model()
 	local items = {}
 	for key, val in pairs(providers.list) do
@@ -457,7 +452,6 @@ function M.select_model()
 end
 
 --- Accepts the pending changes in the current transaction.
---- Clears indicators, closes the preview window, and resets the internal state.
 function M.accept_changes()
 	if not state.transaction.bufnr then
 		return
@@ -469,7 +463,6 @@ function M.accept_changes()
 end
 
 --- Rejects the pending changes in the current transaction.
---- Reverts the buffer to its original state, clears indicators, closes the preview window, and resets the internal state.
 function M.reject_changes()
 	if not state.transaction.bufnr or not state.transaction.original_lines then
 		return
