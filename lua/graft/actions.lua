@@ -51,35 +51,42 @@ local PROMPT_PLAN = [[You are a knowledgeable Senior Technical Lead.
 - Be concise but thorough.
 - When suggesting code, use proper syntax highlighting.]]
 
---- System prompt for Auto-Documentation.
---- Updated to strictly enforce the separator format and exhaustiveness.
-local PROMPT_DOCS = [[You are a Documentation Expert.
-Your task is to improve the documentation of the provided code.
-
-CRITICAL INSTRUCTION:
-You MUST document the 'main' function (or the file's entry point).
-Models often skip 'main' because they think it is trivial. THIS IS FORBIDDEN.
+--- System prompt for File Header Documentation.
+local PROMPT_DOC_HEADER = [[You are a Documentation Expert.
+Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
 
 STRICT OUTPUT FORMAT:
-You must use this EXACT format for every change. Do not deviate.
 <<<< SEARCH
-[The original code with added documentation comments]
+[The first few lines of the file (imports, package declaration, or existing header)]
 ==== REPLACE
-[The original code with added documentation comments]
+[A high-quality file header comment block]
+[The original first few lines of the file]
 >>>> END
 
-IMPORTANT: The separator is "==== REPLACE". Do NOT use "====".
+RULES:
+1. **Scope**: ONLY touch the top of the file. Do NOT document functions or classes further down.
+2. **Content**: The header should describe the file's purpose based on the provided context.
+3. **Format**: Use the comment style appropriate for the language (e.g., --- for Lua, // for Go/Rust, # for Python).
+4. **Preservation**: You must include the original imports/package lines in the REPLACE block so they are not deleted.
+]]
 
-OBJECTIVES:
-1. **File Header**: Ensure the file has a high-quality file-level docstring.
-2. **Entry Point**: Document 'main' (params, return, execution flow).
-3. **All Functions**: Document EVERY function found in the text, from top to bottom.
-4. **No Logic Changes**: Do NOT change any code logic. Only add/edit comments.
+--- System prompt for Selection Documentation.
+local PROMPT_DOC_SELECTION = [[You are a Documentation Expert.
+Your task is to document the SPECIFIC code block provided (Function, Struct, Enum, or Class).
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The exact code block provided in the selection]
+==== REPLACE
+[The documentation comment (Docstring/JSDoc/LuaDoc)]
+[The original code block]
+>>>> END
 
 RULES:
-1. **Sequence**: Process the file from top to bottom.
-2. **Atomic Blocks**: Use separate SEARCH/REPLACE blocks for the file header and EACH function.
-3. **Completeness**: Do not stop generating until you have documented the last function in the file.
+1. **Scope**: Document ONLY the provided selection.
+2. **Style**: Use standard documentation conventions for the language (e.g., JSDoc for JS, LuaCATS for Lua, GoDoc for Go).
+3. **Detail**: Include params, return values, and a brief description.
+4. **Logic**: Do NOT change the code logic. Only add comments.
 ]]
 
 --- System prompt for Scope Mode (Function Isolation).
@@ -239,7 +246,8 @@ function M.start()
 	local options = {
 		components.Menu.item("Refactor (Smart Patch)"),
 		components.Menu.item("Scope Refactor (Function)"),
-		components.Menu.item("Auto Document"),
+		components.Menu.item("Doc: File Header"),
+		components.Menu.item("Doc: Selection (Visual)"),
 		components.Menu.item("Plan (Chat Mode)"),
 		components.Menu.item("Context Manager (" .. ctx_count .. ")"),
 		components.Menu.item("Select Model"),
@@ -250,8 +258,10 @@ function M.start()
 			M.refactor()
 		elseif menu_mode.text == "Scope Refactor (Function)" then
 			M.scope_refactor()
-		elseif menu_mode.text == "Auto Document" then
-			M.document_code()
+		elseif menu_mode.text == "Doc: File Header" then
+			M.document_file_header()
+		elseif menu_mode.text == "Doc: Selection (Visual)" then
+			M.document_selection()
 		elseif menu_mode.text == "Plan (Chat Mode)" then
 			M.plan()
 		elseif menu_mode.text:match("Context Manager") then
@@ -347,16 +357,31 @@ function M.scope_refactor()
 	end)
 end
 
---- Initiates the Auto Documentation workflow.
---- Ensures high-quality documentation for the file and all functions.
-function M.document_code()
+--- Generates a File Header for the current file.
+function M.document_file_header()
+	-- We pass 'normal' state to get the full file context,
+	-- but the prompt instructs to only touch the top.
 	local initial_state = context_manager.get_current_state()
-	utils.notify("Generating documentation... please wait.")
+	utils.notify("Generating file header...")
 	run_patch_job(
-		"Document EVERYTHING: File header, structs, typedefs, enums, globals, and ALL functions. You MUST document 'main'.",
+		"Analyze the file content and generate a comprehensive file-level header comment.",
 		initial_state,
-		PROMPT_DOCS
+		PROMPT_DOC_HEADER,
+		"FULL FILE CONTENT"
 	)
+end
+
+--- Documents the currently selected code (Visual Mode).
+function M.document_selection()
+	local initial_state = context_manager.get_current_state()
+
+	if initial_state.type ~= "visual" then
+		utils.notify("Please select code in Visual Mode first.", vim.log.levels.WARN)
+		return
+	end
+
+	utils.notify("Documenting selection...")
+	run_patch_job("Add documentation comments to this selection.", initial_state, PROMPT_DOC_SELECTION, "SELECTED CODE")
 end
 
 --- Initiates the Plan (Chat Mode) workflow.

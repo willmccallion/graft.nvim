@@ -56,8 +56,13 @@ function M.setup(user_opts)
 		actions.scope_refactor()
 	end, {})
 
-	vim.api.nvim_create_user_command("GraftDoc", function()
-		actions.document_code()
+	-- New Commands for Documentation
+	vim.api.nvim_create_user_command("GraftDocHeader", function()
+		actions.document_file_header()
+	end, {})
+
+	vim.api.nvim_create_user_command("GraftDocSelect", function()
+		actions.document_selection()
 	end, {})
 
 	if user_opts and user_opts.use_default_keymaps ~= false then
@@ -66,7 +71,9 @@ function M.setup(user_opts)
 		vim.keymap.set({ "n", "v" }, "<leader>ap", actions.plan, { desc = "Graft: Plan (Chat)" })
 		vim.keymap.set("n", "<leader>am", actions.select_model, { desc = "Graft: Select Model" })
 		vim.keymap.set("n", "<leader>ag", actions.scope_refactor, { desc = "Graft: Scope Refactor (Function)" })
-		vim.keymap.set("n", "<leader>ad", actions.document_code, { desc = "Graft: Auto Document" })
+
+		-- Updated Keymap: ad triggers selection documentation
+		vim.keymap.set({ "n", "v" }, "<leader>ad", actions.document_selection, { desc = "Graft: Doc Selection" })
 
 		vim.keymap.set("n", "<leader>as", function()
 			if client and client.stop_job then
@@ -91,8 +98,11 @@ M.refactor = actions.refactor
 --- Trigger a refactor action on the function under cursor.
 M.scope_refactor = actions.scope_refactor
 
---- Trigger auto-documentation on the current buffer.
-M.document_code = actions.document_code
+--- Trigger file header documentation.
+M.document_file_header = actions.document_file_header
+
+--- Trigger selection documentation.
+M.document_selection = actions.document_selection
 
 --- Open the planning/chat interface.
 M.plan = actions.plan

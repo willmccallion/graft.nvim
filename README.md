@@ -6,7 +6,7 @@ A Neovim plugin for AI-assisted development, focusing on precise code refactorin
 
 - **Smart Patching**: Applies AI-generated Search/Replace blocks directly to buffers using fuzzy matching and adaptive context resolution. Whitespace and indentation agnostic.
 - **Scope Refactor**: Isolate refactoring to the function under the cursor using Tree-sitter, preventing side effects in the rest of the file.
-- **Auto-Documentation**: Automatically generates high-quality documentation for files and functions, ensuring entry points like `main` are never skipped.
+- **Auto-Documentation**: Generate high-quality documentation for file headers or specific code selections (functions, classes, etc.) using language-specific conventions (JSDoc, LuaCATS, GoDoc).
 - **Context Management**: Add specific files (with multi-select support) or entire directories recursively to provide the LLM with relevant project knowledge.
 - **Multi-Provider Support**: Native integration with Google Gemini (Flash and Pro) and local Ollama instances.
 - **Interactive Chat**: Dedicated split-view interface for architectural planning and technical discussions.
@@ -73,7 +73,9 @@ The plugin generates a patch and applies it to the buffer using fuzzy matching. 
 Target only the function under the cursor. This uses Tree-sitter to identify function boundaries and instructs the AI to modify only the logic within that scope, preserving imports and global state.
 
 ### Auto-Documentation
-Automatically document your code. Graft will analyze the file and generate docstrings for the file header and every function found, following a strict completeness rule.
+Graft provides two specialized documentation workflows:
+- **File Header**: Analyzes the entire file to generate a comprehensive top-level comment block describing the file's purpose and context.
+- **Selection (Visual)**: Documents a specific function, class, or struct. It uses language-appropriate documentation styles (like JSDoc or LuaCATS) and includes parameters and return values.
 
 ### Plan (Chat Mode)
 Open an interactive chat session. Plan mode is context-aware; it uses the current buffer and any files added via the Context Manager to answer architectural questions or help plan complex features across your codebase.
@@ -91,7 +93,8 @@ Manage the files sent to the AI. You can:
 - `GraftReject`: Revert the changes to the original state.
 - `GraftClearChat`: Reset the chat history and buffer.
 - `GraftScope`: Trigger Scope Refactor on the function under cursor.
-- `GraftDoc`: Trigger Auto-Documentation for the current file.
+- `GraftDocHeader`: Generate a file-level header comment.
+- `GraftDocSelect`: Document the current visual selection.
 - `GraftDebug`: Toggle debug logging.
 
 ## Default Keymaps
@@ -103,7 +106,7 @@ If `use_default_keymaps` is not set to `false` in setup:
 - `<leader>ap`: Trigger Plan (Chat).
 - `<leader>am`: Select AI Model/Provider.
 - `<leader>ag`: Scope Refactor (Function).
-- `<leader>ad`: Auto Document.
+- `<leader>ad`: Document Selection (Visual Mode).
 - `<leader>as`: Stop generation.
 - `<leader>ay`: Accept changes.
 - `<leader>an`: Reject changes.
