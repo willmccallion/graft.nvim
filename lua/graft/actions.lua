@@ -63,26 +63,25 @@ CRITICAL RULES:
 5. **NO COMMENTS**: Do NOT add comments, docstrings, Doxygen, or explanations unless the user explicitly asks for them. Output raw, functional code only.
 ]]
 
-local DOC_HEADER_DEFAULT = [[You are a Documentation Expert.
+local DOC_HEADER_C = [[You are a C/C++ Documentation Expert.
 Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
 
 STRICT OUTPUT FORMAT:
 <<<< SEARCH
-[The first few lines of the file (imports, package declaration, or existing header)]
+[The first few lines of the file (includes, macros, or existing header)]
 ==== REPLACE
 [A high-quality file header comment block]
 [The original first few lines of the file]
 >>>> END
 
-RULES:
-1. **Scope**: ONLY touch the top of the file.
-2. **Style**: Use Doxygen style (`/** ... */`) or the language equivalent.
-3. **Tags**: Include `@file`, `@brief`, and `@author` (if known, otherwise omit).
-4. **Content**: Describe the file's architectural role and key responsibilities.
-5. **Preservation**: You must include the original imports/package lines in the REPLACE block so they are not deleted.
+STYLE GUIDE (DOXYGEN):
+1. **Style**: Use Doxygen block style (`/** ... */`).
+2. **Tags**: Include `@file`, `@brief`, and `@author` (if known, otherwise omit).
+3. **Content**: Describe the file's architectural role and key responsibilities.
+4. **Preservation**: You must include the original includes/defines in the REPLACE block so they are not deleted.
 ]]
 
-local DOC_SELECTION_DEFAULT = [[You are a Documentation Expert.
+local DOC_SELECTION_C = [[You are a C/C++ Documentation Expert.
 Your task is to document the SPECIFIC code block provided.
 
 STRICT OUTPUT FORMAT:
@@ -92,23 +91,14 @@ STRICT OUTPUT FORMAT:
 [The documented code block]
 >>>> END
 
-STYLE GUIDE (STRICT):
-
-CASE 1: STRUCTS, UNIONS, ENUMS
-- Place a `/** @brief Description */` block ABOVE the definition.
-- Document EVERY member/field using `///< Description` on the same line (or the line below if long).
-- Do NOT use `@param` inside a struct definition.
-
-CASE 2: FUNCTIONS
-- Place a `/** ... */` block ABOVE the function prototype.
-- Use `@brief` for the summary.
-- Use `@param [name] [description]` for arguments.
-- Use `@return [description]` for return values.
+STYLE GUIDE (DOXYGEN):
+- **Structs/Enums**: Use `/** @brief ... */` above definition. Use `///<` for fields.
+- **Functions**: Use `/** ... */` block above prototype.
+- **Tags**: Use `@brief`, `@param [name] [desc]`, `@return [desc]`.
 
 RULES:
 1. **Consistency**: Apply this style to ALL types found in the selection.
-2. **No Logic Changes**: Do not modify the actual code logic, only add comments.
-3. **Coverage**: Do not leave any member or parameter undocumented.
+2. **No Logic Changes**: Do not modify the actual code logic.
 ]]
 
 local DOC_HEADER_RUST = [[You are a Rust Documentation Expert.
@@ -122,18 +112,15 @@ STRICT OUTPUT FORMAT:
 [The original first few lines]
 >>>> END
 
-STYLE GUIDE (RUST):
+STYLE GUIDE (RUSTDOC):
 1. **Syntax**: Use `//!` for module-level documentation.
 2. **Content**: Provide a high-level summary of the module's purpose.
-3. **No Tags**: Do NOT use `@file` or `@brief`. Use standard Markdown.
+3. **No Tags**: Do NOT use `@file` or `@brief`. Use standard Markdown headers if needed.
 
 Example:
 //! # Module Name
 //!
 //! Brief description of what this module does.
-//!
-//! ## Usage
-//! ...
 ]]
 
 local DOC_SELECTION_RUST = [[You are a Rust Documentation Expert.
@@ -146,41 +133,98 @@ STRICT OUTPUT FORMAT:
 [The documented code block]
 >>>> END
 
-STYLE GUIDE (RUST):
-
-CASE 1: STRUCTS & ENUMS
-- Place `///` comments ABOVE the struct/enum definition.
-- Place `///` comments ABOVE each field. Do NOT use `///<` (trailing comments).
-
-Example:
-/// Represents a user in the system.
-struct User {
-    /// The user's unique ID.
-    id: usize,
-}
-
-CASE 2: FUNCTIONS
-- Place `///` comments ABOVE the function signature.
-- Use Markdown sections for arguments and return values.
-- Do NOT use `@param` or `@return`.
+STYLE GUIDE (RUSTDOC):
+- **Items**: Place `///` comments ABOVE structs, enums, functions, and fields.
+- **Arguments**: Use Markdown lists or sections (e.g., `# Arguments`) inside the comment.
+- **No Tags**: Do NOT use `@param` or `@return`.
 
 Example:
-/// Calculates the sum of two numbers.
+/// Calculates the sum.
 ///
 /// # Arguments
-///
-/// * `a` - The first number.
-/// * `b` - The second number.
-///
-/// # Returns
-///
-/// The sum of `a` and `b`.
+/// * `a` - First number
 fn add(a: i32, b: i32) -> i32 { ... }
+]]
+
+local DOC_HEADER_LUA = [[You are a Lua Documentation Expert.
+Your task is to add or update the MODULE-LEVEL documentation at the very top of the file.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The first few lines of the file]
+==== REPLACE
+[The module documentation]
+[The original first few lines]
+>>>> END
+
+STYLE GUIDE (EMMYLUA / LDOC):
+1. **Syntax**: Use `---` (three dashes) for documentation comments.
+2. **Tags**: Use `@module [name]`, `@brief` (or `@description`), and `@author`.
+3. **Content**: Describe the module's purpose.
+
+Example:
+--- @module my_module
+--- @brief Handles X and Y logic.
+local M = {}
+]]
+
+local DOC_SELECTION_LUA = [[You are a Lua Documentation Expert.
+Your task is to document the SPECIFIC code block provided using EmmyLua/LDoc style.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The exact code block provided in the selection]
+==== REPLACE
+[The documented code block]
+>>>> END
+
+STYLE GUIDE (EMMYLUA / LDOC):
+- **Syntax**: Place `---` comments ABOVE the function or table.
+- **Tags**:
+  - `@param [name] [type] [description]`
+  - `@return [type] [description]`
+  - `@field [name] [type] [description]` (for tables)
+
+Example:
+--- Calculates sum.
+--- @param a number First number
+--- @return number The sum
+function M.add(a, b) ... end
+]]
+
+local DOC_HEADER_GENERIC = [[You are a Polyglot Documentation Expert.
+Your task is to add or update the FILE-LEVEL HEADER comment at the very top of the file.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The first few lines of the file]
+==== REPLACE
+[The file header comment block]
+[The original first few lines]
+>>>> END
 
 RULES:
-1. **Idiomatic**: Use standard Rustdoc (`///`).
-2. **No Logic Changes**: Do not modify code logic.
-3. **Coverage**: Document all public fields and arguments.
+1. **Language Detection**: Analyze the code to detect the language (e.g., Python, Go, JS).
+2. **Style**: Use the STANDARD idiom for that language (e.g., `"""` docstrings for Python, `//` for Go, `/**` for JS).
+3. **Content**: Describe the file's purpose clearly.
+4. **Preservation**: You must include the original imports/package lines in the REPLACE block.
+]]
+
+local DOC_SELECTION_GENERIC = [[You are a Polyglot Documentation Expert.
+Your task is to document the SPECIFIC code block provided.
+
+STRICT OUTPUT FORMAT:
+<<<< SEARCH
+[The exact code block provided in the selection]
+==== REPLACE
+[The documented code block]
+>>>> END
+
+RULES:
+1. **Language Detection**: Analyze the code to detect the language.
+2. **Style**: Use the STANDARD documentation idiom for that language (e.g., JSDoc for JS/TS, Docstrings for Python).
+3. **Consistency**: Document all parameters and return values if applicable.
+4. **No Logic Changes**: Do not modify the actual code logic.
 ]]
 
 --- Recursively adds files from a directory to the context.
@@ -420,9 +464,13 @@ function M.document_file_header()
 	local initial_state = context_manager.get_current_state()
 	local ft = vim.bo.filetype
 
-	local prompt = DOC_HEADER_DEFAULT
+	local prompt = DOC_HEADER_GENERIC
 	if ft == "rust" then
 		prompt = DOC_HEADER_RUST
+	elseif ft == "lua" then
+		prompt = DOC_HEADER_LUA
+	elseif vim.tbl_contains({ "c", "cpp", "java" }, ft) then
+		prompt = DOC_HEADER_C
 	end
 
 	utils.notify("Generating file header (" .. ft .. ")...")
@@ -444,9 +492,13 @@ function M.document_selection()
 	end
 
 	local ft = vim.bo.filetype
-	local prompt = DOC_SELECTION_DEFAULT
+	local prompt = DOC_SELECTION_GENERIC
 	if ft == "rust" then
 		prompt = DOC_SELECTION_RUST
+	elseif ft == "lua" then
+		prompt = DOC_SELECTION_LUA
+	elseif vim.tbl_contains({ "c", "cpp", "java" }, ft) then
+		prompt = DOC_SELECTION_C
 	end
 
 	utils.notify("Documenting selection (" .. ft .. ")...")
