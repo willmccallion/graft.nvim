@@ -20,6 +20,21 @@ function M.stop_job()
 	state.is_streaming = false
 end
 
+--- Helper to write logs to cache dir
+local function write_log(filename, content, header)
+	local path = vim.fn.stdpath("cache") .. "/" .. filename
+	local f = io.open(path, "w")
+	if f then
+		if header then
+			f:write(header .. "\n")
+		end
+		f:write(content)
+		f:close()
+		return path
+	end
+	return nil
+end
+
 --- Initiates a streaming request to an LLM provider and processes the output.
 --- @param provider table The provider configuration.
 --- @param prompt string The user prompt.
@@ -177,30 +192,19 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 					process_line(buffer_text)
 				end
 
-				-- --- ERROR LOGGING START ---
+				-- --- ERROR LOGGING (NETWORK/CURL) ---
 				if full_response == "" and stderr_buffer ~= "" then
-					-- Write error to log file instead of opening preview
-					local log_path = vim.fn.stdpath("cache") .. "/graft_error.log"
-					local f = io.open(log_path, "w")
-					if f then
-						f:write("--- GRAFT API ERROR ---\n")
-						f:write("Timestamp: " .. os.date() .. "\n")
-						f:write("Provider: " .. (provider.name or "Unknown") .. "\n")
-						f:write("URL: " .. url .. "\n")
-						f:write("---------------------\n")
-						f:write(stderr_buffer)
-						f:close()
-						utils.notify("API Request Failed. Debug info saved to: " .. log_path, vim.log.levels.ERROR)
-					else
-						utils.notify("API Request Failed. (Could not write to log file)", vim.log.levels.ERROR)
-					end
+					local header = "--- GRAFT API ERROR ---\nURL: " .. url
+					local log_path = write_log("graft_error.log", stderr_buffer, header)
+					utils.notify(
+						"API Request Failed. Debug info: " .. (log_path or "Error writing log"),
+						vim.log.levels.ERROR
+					)
 
-					-- Ensure spinner stops and we exit
 					state.is_streaming = false
 					indicators.stop_spinner(target_buf)
 					return
 				end
-				-- --- ERROR LOGGING END ---
 
 				-- --- RETRY LOGIC START ---
 				if is_patch and patches_applied == 0 and retry_count < max_retries then
@@ -254,6 +258,7 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 				if is_patch then
 					if patches_applied > 0 then
+						-- SUCCESS CASE
 						local attempts = retry_count + 1
 						local score_display = math.floor(min_score * 100)
 						local msg = string.format(
@@ -266,21 +271,33 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 						utils.notify(msg)
 						preview.close()
 					elseif full_response:match("<<<< SEARCH") then
-						if not show_preview then
-							local buf, _ = preview.ensure_preview_window()
-							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
-						end
+						-- FAILURE CASE 1: AI tried to code, but context match failed
+						local log_path =
+							write_log("graft_ai_response.log", full_response, "--- GRAFT FAILED PATCH RESPONSE ---")
+
 						if retry_count == max_retries then
-							utils.notify("Auto-fix failed. Check Preview.", vim.log.levels.ERROR)
+							utils.notify(
+								"Auto-fix failed. Response saved to: " .. (log_path or "cache"),
+								vim.log.levels.ERROR
+							)
 						else
-							utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
+							utils.notify(
+								"Refactor Failed: Context match error. Response saved to: " .. (log_path or "cache"),
+								vim.log.levels.ERROR
+							)
 						end
 					else
-						if not show_preview then
-							local buf, _ = preview.ensure_preview_window()
-							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
-						end
-						utils.notify("Refactor Failed: No SEARCH/REPLACE blocks found.", vim.log.levels.WARN)
+						-- FAILURE CASE 2: AI didn't output code blocks (Chatted instead)
+						local log_path = write_log(
+							"graft_ai_response.log",
+							full_response,
+							"--- GRAFT INVALID RESPONSE (NO BLOCKS) ---"
+						)
+						utils.notify(
+							"Refactor Failed: No SEARCH/REPLACE blocks found. Response saved to: "
+								.. (log_path or "cache"),
+							vim.log.levels.WARN
+						)
 					end
 				else
 					utils.notify("Done." .. token_msg)
