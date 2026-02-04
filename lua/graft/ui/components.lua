@@ -22,7 +22,8 @@ function M.ask(title, on_submit)
 			style = "rounded",
 			text = {
 				top = " " .. title .. " ",
-				bottom = " [Ctrl+Enter] to Submit ",
+				-- Updated label to show the universal key
+				bottom = " [Ctrl+y] or [Ctrl+Enter] to Submit ",
 			},
 		},
 		position = { row = "10%", col = "98%" },
@@ -56,8 +57,16 @@ function M.ask(title, on_submit)
 		vim.cmd("stopinsert")
 	end, { noremap = true })
 
+	-- Modern Terminals (Kitty, WezTerm, etc.)
 	popup:map("i", "<C-CR>", submit_input, { noremap = true })
+
+	-- Windows / Legacy (Careful: might trigger XOFF on Linux)
 	popup:map("i", "<C-s>", submit_input, { noremap = true })
+
+	-- Universal Fallback (Works everywhere)
+	popup:map("i", "<C-y>", submit_input, { noremap = true })
+
+	-- Normal mode submit
 	popup:map("n", "<CR>", submit_input, { noremap = true })
 end
 
