@@ -23,7 +23,8 @@ end
 --- @param bufnr integer The buffer ID where the operation is occurring.
 --- @param line integer The line number (currently unused).
 --- @param model_name string|nil The name of the AI model being used.
-function M.start_spinner(bufnr, line, model_name)
+--- @param retry_count integer|nil The current retry attempt number (0 for first try).
+function M.start_spinner(bufnr, line, model_name, retry_count)
 	M.stop_spinner()
 	start_time = vim.loop.hrtime()
 
@@ -32,13 +33,16 @@ function M.start_spinner(bufnr, line, model_name)
 		fname = "[No Name]"
 	end
 
+	local is_retry = retry_count and retry_count > 0
+	local height = is_retry and 5 or 4
+
 	loading_popup = Popup({
 		enter = false,
 		focusable = false,
 		zindex = 50,
 		position = { row = 1, col = "100%" },
 		anchor = "NE",
-		size = { width = 35, height = 4 },
+		size = { width = 35, height = height },
 		border = {
 			style = "rounded",
 			text = { top = " Graft AI " },
@@ -70,6 +74,11 @@ function M.start_spinner(bufnr, line, model_name)
 				string.format(" Context: %d files", #state.context_files),
 				string.format(" Edit: %s", fname),
 			}
+
+			if is_retry then
+				-- Insert the attempt line right after the model name
+				table.insert(lines, 2, string.format(" Attempt: %d (Auto-Fixing)", retry_count + 1))
+			end
 
 			vim.api.nvim_buf_set_lines(loading_popup.bufnr, 0, -1, false, lines)
 		end)

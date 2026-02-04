@@ -56,8 +56,8 @@ local function make_gemini_body(prompt, model, history, system_instruction_text)
 		table.insert(contents, { role = "user", parts = { { text = prompt } } })
 	end
 
-	local is_flash = model:match("flash")
-	local max_tokens = is_flash and 8192 or 1000000
+	-- local is_flash = model:match("flash")
+	local max_tokens = 1000000
 
 	return vim.fn.json_encode({
 		contents = contents,

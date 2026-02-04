@@ -1,6 +1,5 @@
 --- @module graft.api.client
 --- @brief Handles streaming responses from LLM providers and processing them into Neovim buffers.
---- Supports both chat-style appending and search-and-replace patching.
 local M = {}
 local Job = require("plenary.job")
 local state = require("graft.core.state")
@@ -11,7 +10,7 @@ local indicators = require("graft.ui.indicators")
 local patcher = require("graft.core.patcher")
 local parsers = require("graft.api.parsers")
 
---- Stops the currently active streaming job and cleans up UI indicators.
+--- Stops the currently active streaming job.
 function M.stop_job()
 	if state.job then
 		state.job:shutdown()
@@ -22,19 +21,18 @@ function M.stop_job()
 end
 
 --- Initiates a streaming request to an LLM provider and processes the output.
---- @param provider table The provider configuration (e.g., OpenAI, Anthropic).
---- @param prompt string The user prompt to send.
---- @param target_buf number The buffer handle where output should be directed.
---- @param opts table Configuration options:
----   - is_chat (boolean): Whether this is a chat interaction.
----   - is_patch (boolean): Whether this is a code refactoring/patching operation.
----   - model_name (string): Name of the model being used.
----   - system_prompt (string): Optional system prompt.
----   - replace_range (table): Optional [start, end] line range for patching.
+--- @param provider table The provider configuration.
+--- @param prompt string The user prompt.
+--- @param target_buf number The buffer handle.
+--- @param opts table Configuration options.
 function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local is_chat = opts.is_chat or false
 	local is_patch = opts.is_patch or false
 	local model_name = opts.model_name or "Unknown Model"
+
+	-- Track retries
+	local retry_count = opts.retry_count or 0
+	local max_retries = 2
 
 	parsers.reset()
 
@@ -42,7 +40,9 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 	if is_patch and show_preview then
 		local buf, _ = preview.ensure_preview_window()
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "--- graft START [" .. model_name .. "] ---", "" })
+		local header = retry_count > 0 and ("--- RETRY ATTEMPT " .. retry_count .. " ---")
+			or ("--- graft START [" .. model_name .. "] ---")
+		vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", header, "" })
 	end
 
 	local output_buf = target_buf
@@ -53,6 +53,11 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 	local replace_buffer = {}
 	local buffer_text = ""
 	local patches_applied = 0
+
+	-- Stats tracking
+	local last_patch_result = { success = false, score = 0 }
+	local min_score = 1.0
+	local captured_search_block = {}
 
 	local usage_stats = { input = 0, output = 0, total = 0 }
 
@@ -83,8 +88,16 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 				return
 			elseif line:match("^%s*>>>> END") then
 				if sr_mode == "REPLACE" then
-					if patcher.apply_search_replace(target_buf, search_buffer, replace_buffer, opts.replace_range) then
+					captured_search_block = vim.deepcopy(search_buffer)
+
+					last_patch_result =
+						patcher.apply_search_replace(target_buf, search_buffer, replace_buffer, opts.replace_range)
+
+					if last_patch_result.success then
 						patches_applied = patches_applied + 1
+						if last_patch_result.score < min_score then
+							min_score = last_patch_result.score
+						end
 					end
 				end
 				sr_mode = "IDLE"
@@ -104,7 +117,8 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 	local spinner_line = (is_patch and opts.replace_range and opts.replace_range[1])
 		or (vim.api.nvim_win_get_cursor(0)[1] - 1)
-	indicators.start_spinner(target_buf, spinner_line, model_name)
+
+	indicators.start_spinner(target_buf, spinner_line, model_name, retry_count)
 
 	local history = is_chat and state.chat_history or {}
 	if is_chat then
@@ -159,19 +173,70 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 		end,
 		on_exit = function()
 			vim.schedule(function()
-				if full_response == "" and stderr_buffer ~= "" then
-					utils.notify("API Request Failed. Check Preview.", vim.log.levels.ERROR)
-					if not show_preview then
-						local buf, _ = preview.ensure_preview_window()
-						vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(stderr_buffer, "\n"))
-					else
-						preview.log("ERROR: " .. stderr_buffer)
-					end
-				end
-
 				if buffer_text ~= "" then
 					process_line(buffer_text)
 				end
+
+				-- --- ERROR LOGGING START ---
+				if full_response == "" and stderr_buffer ~= "" then
+					-- Write error to log file instead of opening preview
+					local log_path = vim.fn.stdpath("cache") .. "/graft_error.log"
+					local f = io.open(log_path, "w")
+					if f then
+						f:write("--- GRAFT API ERROR ---\n")
+						f:write("Timestamp: " .. os.date() .. "\n")
+						f:write("Provider: " .. (provider.name or "Unknown") .. "\n")
+						f:write("URL: " .. url .. "\n")
+						f:write("---------------------\n")
+						f:write(stderr_buffer)
+						f:close()
+						utils.notify("API Request Failed. Debug info saved to: " .. log_path, vim.log.levels.ERROR)
+					else
+						utils.notify("API Request Failed. (Could not write to log file)", vim.log.levels.ERROR)
+					end
+
+					-- Ensure spinner stops and we exit
+					state.is_streaming = false
+					indicators.stop_spinner(target_buf)
+					return
+				end
+				-- --- ERROR LOGGING END ---
+
+				-- --- RETRY LOGIC START ---
+				if is_patch and patches_applied == 0 and retry_count < max_retries then
+					if last_patch_result.score > 0.45 then
+						utils.notify(
+							string.format(
+								"Patch failed (Confidence %.0f%%). Attempting auto-fix...",
+								last_patch_result.score * 100
+							),
+							vim.log.levels.WARN
+						)
+
+						local search_block_str = table.concat(captured_search_block, "\n")
+						local repair_prompt = string.format(
+							"Your previous attempt failed because the SEARCH block did not match the file content exactly.\n"
+								.. "Confidence Score: %.2f%%\n"
+								.. "Your SEARCH block was:\n```\n%s\n```\n"
+								.. "Please RETRY. Ensure the SEARCH block matches the file content byte-for-byte (check indentation and whitespace). Output the corrected SEARCH/REPLACE block.",
+							last_patch_result.score * 100,
+							search_block_str
+						)
+
+						local combined_prompt = prompt .. "\n\n" .. "SYSTEM: " .. repair_prompt
+						local new_opts = vim.deepcopy(opts)
+						new_opts.retry_count = retry_count + 1
+
+						M.stream_to_buffer(provider, combined_prompt, target_buf, new_opts)
+						return
+					elseif last_patch_result.score > 0 and last_patch_result.score <= 0.45 then
+						utils.notify(
+							"Patch failed. The model hallucinated the code structure (Low Confidence).",
+							vim.log.levels.ERROR
+						)
+					end
+				end
+				-- --- RETRY LOGIC END ---
 
 				state.is_streaming = false
 				indicators.stop_spinner(target_buf)
@@ -189,23 +254,33 @@ function M.stream_to_buffer(provider, prompt, target_buf, opts)
 
 				if is_patch then
 					if patches_applied > 0 then
-						utils.notify("Refactor Complete. Applied " .. patches_applied .. " changes." .. token_msg)
+						local attempts = retry_count + 1
+						local score_display = math.floor(min_score * 100)
+						local msg = string.format(
+							"Refactor Complete (Try %d, %d%% match). Applied %d changes.%s",
+							attempts,
+							score_display,
+							patches_applied,
+							token_msg
+						)
+						utils.notify(msg)
 						preview.close()
 					elseif full_response:match("<<<< SEARCH") then
 						if not show_preview then
 							local buf, _ = preview.ensure_preview_window()
 							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
 						end
-						utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
+						if retry_count == max_retries then
+							utils.notify("Auto-fix failed. Check Preview.", vim.log.levels.ERROR)
+						else
+							utils.notify("Refactor Failed: Context match error." .. token_msg, vim.log.levels.ERROR)
+						end
 					else
 						if not show_preview then
 							local buf, _ = preview.ensure_preview_window()
 							vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(full_response, "\n"))
 						end
-						utils.notify(
-							"Refactor Failed: No SEARCH/REPLACE blocks found. Check Preview." .. token_msg,
-							vim.log.levels.WARN
-						)
+						utils.notify("Refactor Failed: No SEARCH/REPLACE blocks found.", vim.log.levels.WARN)
 					end
 				else
 					utils.notify("Done." .. token_msg)

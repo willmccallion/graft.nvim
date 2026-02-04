@@ -34,11 +34,7 @@ local function get_line_score(a, b)
 end
 
 --- Applies a search and replace operation.
---- @param bufnr number The buffer handle.
---- @param search_block table The list of lines to search for.
---- @param replace_block table The list of lines to replace with.
---- @param range table|nil Optional [start_line, end_line] (0-indexed) to constrain search.
---- @return boolean True if applied.
+--- @return table result { success=bool, score=number, msg=string }
 function M.apply_search_replace(bufnr, search_block, replace_block, range)
 	M.save_snapshot(bufnr)
 
@@ -46,31 +42,25 @@ function M.apply_search_replace(bufnr, search_block, replace_block, range)
 	local buf_len = #buf_lines
 	local search_len = #search_block
 
+	-- Handle empty file case
 	local is_buf_empty = (buf_len == 0) or (buf_len == 1 and buf_lines[1] == "")
 	if is_buf_empty then
 		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, replace_block)
 		preview.log(">> Applied Patch (Empty File Mode)")
-		return true
+		return { success = true, score = 1.0, msg = "Empty file populated" }
 	end
 
-	-- If search block is empty but file isn't, we can't safely match "nothing".
-	-- (Unless we implement pure insertion, but for refactor this usually implies an error)
 	if search_len == 0 then
-		preview.log("!! PATCH FAILED !! Search block was empty, but file is not.")
-		return false
+		return { success = false, score = 0.0, msg = "Search block was empty" }
 	end
 
 	local best_idx = -1
 	local best_score = -1.0
-
 	local search_start = 0
 	local search_end = buf_len - search_len
 
 	if range then
-		-- Ensure we don't go out of bounds
 		search_start = math.max(0, range[1])
-		-- We allow the search to scan slightly past the visual selection end
-		-- to account for context mismatch, but generally keep it tight.
 		search_end = math.min(search_end, range[2])
 	end
 
@@ -78,8 +68,6 @@ function M.apply_search_replace(bufnr, search_block, replace_block, range)
 	for i = search_start, search_end do
 		local current_match_score = 0
 		for j = 1, search_len do
-			-- i is 0-indexed, lua tables are 1-indexed
-			-- buf_lines[i + j] gets the line at index i + (j-1) + 1
 			local line_idx = i + j
 			if line_idx <= buf_len then
 				local line_score = get_line_score(buf_lines[line_idx], search_block[j])
@@ -101,16 +89,17 @@ function M.apply_search_replace(bufnr, search_block, replace_block, range)
 
 		vim.api.nvim_buf_set_lines(bufnr, start_row, end_row, false, replace_block)
 
-		-- Highlight the changes
 		for i = 0, #replace_block - 1 do
 			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "graftAdd", start_row + i, 0, -1)
 		end
 
-		preview.log(string.format(">> Applied Patch (Confidence: %.0f%%) at line %d", best_score * 100, start_row + 1))
-		return true
+		local msg = string.format(">> Applied Patch (Confidence: %.0f%%)", best_score * 100)
+		preview.log(msg)
+		return { success = true, score = best_score, msg = msg }
 	else
-		preview.log("!! PATCH FAILED !! Best match was only " .. (best_score * 100) .. "%")
-		return false
+		local msg = string.format("!! PATCH FAILED !! Best match was only %.0f%%", best_score * 100)
+		preview.log(msg)
+		return { success = false, score = best_score, msg = msg }
 	end
 end
 
