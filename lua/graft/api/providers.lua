@@ -128,7 +128,7 @@ M.list = {
 		verify = function()
 			if not get_key() then
 				utils.debug_log("MISSING KEY")
-				return false
+				return false, "Gemini API Key is missing. Please set GEMINI_API_KEY."
 			end
 			return true
 		end,
@@ -144,7 +144,7 @@ M.list = {
 		verify = function()
 			if not get_key() then
 				utils.debug_log("MISSING KEY")
-				return false
+				return false, "Gemini API Key is missing. Please set GEMINI_API_KEY."
 			end
 			return true
 		end,
